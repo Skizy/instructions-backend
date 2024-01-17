@@ -7,8 +7,9 @@
 		"dev": "bun run --watch src/index.ts"
 	},
 	"dependencies": {
-		"elysia": "^0.8.9",
-		"@elysiajs/cors": "^0.8.0"
+		"@elysiajs/cors": "^0.8.0",
+		"@elysiajs/static": "^0.8.1",
+		"elysia": "^0.8.9"
 	},
 	"devDependencies": {
 		"bun-types": "latest"
