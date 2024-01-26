@@ -1,11 +1,9 @@
 import { Elysia, t } from "elysia";
 import { Long, MongoClient } from "mongodb";
 import { cors } from "@elysiajs/cors";
-import { staticPlugin } from "@elysiajs/static";
 import room from "../public/room.json";
 
 type Model = {
-	// id: number;
 	name: string;
 	manufacturer: string;
 	date: number | Long;
@@ -13,13 +11,6 @@ type Model = {
 };
 
 async function main() {
-	// const files = (
-	// 	await new Response(Bun.spawn(["ls", "./models"]).stdout).text()
-	// )
-	// 	.trim()
-	// 	.split("\n")
-	// 	.map((x) => x.slice(0, x.length - 5));
-
 	const mongo = new MongoClient("mongodb://localhost:27017");
 
 	const date = new Long(BigInt(Date.now()));
@@ -39,9 +30,17 @@ async function main() {
 
 	const app = new Elysia()
 		.use(cors())
-		.use(staticPlugin())
 		.get("/", () => "Hello Elysia")
 		.head("/public", () => undefined)
+		.get("/public/*", async ({ params, set }) => {
+			const asset = params["*"];
+			const file = Bun.file(`./public/${asset}`);
+			if (await file.exists()) {
+				return file;
+			}
+			set.status = "Not Found";
+			return;
+		})
 		.get("/room.json", () => room)
 		.get("/modelList", async ({ set }) => {
 			try {
