@@ -53,11 +53,11 @@ async function main() {
 					name: 1,
 					fileName: 1,
 				});
-				const docs: { name: string; fileName: string }[] = [];
+				const docs: string[] = [];
 				for await (const doc of cur) {
 					const file = Bun.file(`./uploaded_stuff/${doc.fileName}`);
 					if (await file.exists()) {
-						docs.push(doc);
+						docs.push(doc.fileName.slice(0, doc.fileName.length - 5));
 					} else {
 						console.log(`${doc.name} at ${doc.fileName} does not exist`);
 					}
@@ -73,7 +73,7 @@ async function main() {
 			}
 		})
 		.get("/models/:model", async ({ params: { model }, set }) => {
-			const modelFile = Bun.file(`./uploaded_stuff/${model}`);
+			const modelFile = Bun.file(`./uploaded_stuff/${model}.gltf`);
 
 			if (await modelFile.exists()) {
 				return modelFile.text();
