@@ -13,12 +13,12 @@ type Model = {
 };
 
 async function main() {
-	const files = (
-		await new Response(Bun.spawn(["ls", "./models"]).stdout).text()
-	)
-		.trim()
-		.split("\n")
-		.map((x) => x.slice(0, x.length - 5));
+	// const files = (
+	// 	await new Response(Bun.spawn(["ls", "./models"]).stdout).text()
+	// )
+	// 	.trim()
+	// 	.split("\n")
+	// 	.map((x) => x.slice(0, x.length - 5));
 
 	const mongo = new MongoClient("mongodb://localhost:27017");
 
@@ -43,9 +43,37 @@ async function main() {
 		.get("/", () => "Hello Elysia")
 		.head("/public", () => undefined)
 		.get("/room.json", () => room)
-		.get("/modelList", () => files)
+		.get("/modelList", async ({ set }) => {
+			try {
+				mongo.connect();
+				const db = mongo.db("setup3d");
+				const col = db.collection<Model>("models");
+
+				const cur = col.find().project<{ name: string; fileName: string }>({
+					name: 1,
+					fileName: 1,
+				});
+				const docs: { name: string; fileName: string }[] = [];
+				for await (const doc of cur) {
+					const file = Bun.file(`./uploaded_stuff/${doc.fileName}`);
+					if (await file.exists()) {
+						docs.push(doc);
+					} else {
+						console.log(`${doc.name} at ${doc.fileName} does not exist`);
+					}
+				}
+
+				return docs;
+			} catch (e) {
+				console.error(e);
+				set.status = "Internal Server Error";
+				return;
+			} finally {
+				mongo.close();
+			}
+		})
 		.get("/models/:model", async ({ params: { model }, set }) => {
-			const modelFile = Bun.file(`./models/${model}.gltf`);
+			const modelFile = Bun.file(`./uploaded_stuff/${model}`);
 
 			if (await modelFile.exists()) {
 				return modelFile.text();
@@ -56,7 +84,6 @@ async function main() {
 		})
 		.post(
 			"/models",
-
 			async ({ body, set }) => {
 				const formData = body;
 				console.dir(formData);
@@ -65,7 +92,7 @@ async function main() {
 				await Bun.write(`./uploaded_stuff/${fileName}`, body.file);
 				const date = new Long(BigInt(Date.now()));
 
-				// TODO: Do this asynchronously
+				// TODO: Do this asynchronously (?)
 				try {
 					mongo.connect();
 					const db = mongo.db("setup3d");
@@ -77,6 +104,10 @@ async function main() {
 						manufacturer: body.manufacturer,
 						date,
 					});
+				} catch (e) {
+					console.error(e);
+					set.status = "Internal Server Error";
+					return;
 				} finally {
 					mongo.close();
 				}

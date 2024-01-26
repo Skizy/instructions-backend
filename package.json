@@ -9,7 +9,8 @@
 	"dependencies": {
 		"@elysiajs/cors": "^0.8.0",
 		"@elysiajs/static": "^0.8.1",
-		"elysia": "^0.8.9"
+		"elysia": "^0.8.13",
+		"mongodb": "^6.3.0"
 	},
 	"devDependencies": {
 		"bun-types": "latest"
