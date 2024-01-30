@@ -8,11 +8,13 @@
 	},
 	"dependencies": {
 		"@elysiajs/cors": "^0.8.0",
-		"elysia": "^0.8.9",
+		"elysia": "^0.8.15",
 		"mongodb": "^6.3.0"
 	},
 	"devDependencies": {
-		"bun-types": "latest"
+		"bun-types": "latest",
+		"@typescript-eslint/eslint-plugin": "^6.20.0",
+		"@typescript-eslint/parser": "^6.20.0"
 	},
 	"module": "src/index.js"
 }
