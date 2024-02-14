@@ -11,6 +11,7 @@ type Model = {
 	manufacturer: string;
 	date: number | Long;
 	fileName: string;
+	hidden?: boolean;
 };
 
 async function main() {
@@ -40,7 +41,7 @@ async function main() {
 				await mongo.connect();
 				const db = mongo.db("setup3d");
 				const col = db.collection<Model>("devcollection");
-				const cur = col.find();
+				const cur = col.find({ hidden: { $not: { $eq: true } } });
 				const docs: {
 					id: string;
 					name: string;
