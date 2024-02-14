@@ -165,7 +165,8 @@ async function main() {
 						const id = result.insertedId.toHexString();
 
 						console.log("creating a dir");
-						await $`bash -c ${`mkdir -p ./assets/${id}/deps`}`;
+						// await $`bash -c ${`mkdir -p ./assets/${id}/deps`}`;
+						await $`mkdir -p ./assets/${id}/deps`;
 						console.log("created a dir");
 
 						await Bun.write(`./assets/${id}/${fileName}`, body.file);
