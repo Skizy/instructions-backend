@@ -1,4 +1,4 @@
-import { readdir, exists } from "node:fs/promises";
+import { readdir, access } from "node:fs/promises";
 import { Elysia, t } from "elysia";
 import { Long, MongoClient, ObjectId } from "mongodb";
 import { cors } from "@elysiajs/cors";
@@ -50,17 +50,20 @@ async function main() {
 				}[] = [];
 				for await (const doc of cur) {
 					const id = doc._id.toHexString();
-					const file = Bun.file(`./assets/${id}/${doc.fileName}`);
-					if (await file.exists()) {
-						docs.push({
-							id,
-							name: doc.name,
-							date: doc.date as number,
-							manufacturer: doc.manufacturer,
-						});
-					} else {
-						console.log(`${doc.name} at ${doc.fileName} does not exist`);
+
+					try {
+						access(`./assets/${id}/${doc.fileName}`);
+					} catch (e) {
+						console.error(`${doc.name} at ${doc.fileName} is not accessible`);
+						continue;
 					}
+
+					docs.push({
+						id,
+						name: doc.name,
+						date: doc.date as number,
+						manufacturer: doc.manufacturer,
+					});
 				}
 
 				return docs;
@@ -85,14 +88,6 @@ async function main() {
 					const doc = await col.findOne({ _id: id });
 					if (doc !== null) {
 						const fileName = doc.fileName;
-
-						if (
-							!(await exists(`./assets/${model}`)) ||
-							!(await exists(`./assets/${model}/${fileName}`))
-						) {
-							set.status = "Internal Server Error";
-							return;
-						}
 
 						const assetsPath = `./assets/${model}/deps`;
 						let files: Dirent[];
@@ -120,7 +115,16 @@ async function main() {
 							fd.append(name, Bun.file(`${assetsPath}/${name}`));
 						}
 
-						return new Response(fd);
+						let response: Response;
+						try {
+							response = new Response(fd);
+						} catch (e) {
+							console.error(`Couldn't create response: ${e}`);
+							set.status = "Internal Server Error";
+							return;
+						}
+
+						return response;
 					}
 				} catch (e) {
 					console.error(e);
