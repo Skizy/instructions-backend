@@ -15,7 +15,22 @@ type Model = {
 };
 
 async function main() {
-	const mongo = new MongoClient("mongodb://localhost:27017");
+	let config = {
+		port: 3005,
+		mongourl: "mongodb://localhost:27017",
+	};
+
+	try {
+		config = {
+			...config,
+			...(await Bun.file("../../config/server.json").json()),
+		};
+	} catch (e) {
+		console.error(`Couldn't read config file: ${e}`);
+		console.log("Using default config");
+	}
+
+	const mongo = new MongoClient(config.mongourl);
 
 	const date = new Long(BigInt(Date.now()));
 
@@ -34,7 +49,11 @@ async function main() {
 
 	const app = new Elysia()
 		.use(cors())
-		.get("/", () => "Hello Elysia")
+		.get("/", Bun.file("./frontend/index.html"))
+		.get("/assets/:asset", async ({ params: { asset }, set }) => {
+			return Bun.file(`./frontend/assets/${asset}`);
+		})
+		.get("/models", Bun.file("./frontend/models/index.html"))
 		.get("/room.json", () => room)
 		.get("/modelList", async ({ set }) => {
 			try {
@@ -217,10 +236,19 @@ async function main() {
 				}),
 			},
 		)
+		.get("/:asset", async ({ params: { asset }, set }) => {
+			const file = Bun.file(`./frontend/${asset}`);
+			if (await file.exists()) {
+				return file;
+			}
+
+			set.status = "Not Found";
+			return "Not found";
+		})
 		.onError((err) => {
 			console.error(err);
 		})
-		.listen(3005);
+		.listen(config.port);
 
 	console.log(
 		`Elysia is running at ${app.server?.hostname}:${app.server?.port}`,
