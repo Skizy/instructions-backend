@@ -30,10 +30,16 @@ async function main() {
 		mongourl: "mongodb://localhost:27017",
 	};
 
+	let envConfigPath = Bun.env.CONFIG_PATH;
+
+	if (envConfigPath === undefined) {
+		envConfigPath = "../../config/server.json";
+	}
+
 	try {
 		config = {
 			...config,
-			...(await Bun.file("../../config/server.json").json()),
+			...(await Bun.file(envConfigPath).json()),
 		};
 	} catch (e) {
 		console.error(`Couldn't read config file: ${e}`);
