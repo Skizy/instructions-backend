@@ -14,6 +14,16 @@ type Model = {
 	hidden?: boolean;
 };
 
+type UserData = {
+	email: string;
+	passwordHash: string;
+};
+
+type CookieDoc = {
+	email: string;
+	cookie: string;
+};
+
 async function main() {
 	let config = {
 		port: 3005,
@@ -48,14 +58,12 @@ async function main() {
 	}
 
 	const app = new Elysia()
-		.use(cors())
-		.get("/", Bun.file("./frontend/index.html"))
-		.get("/assets/:asset", async ({ params: { asset }, set }) => {
+		// .use(cors())
+		.get("/assets/:asset", async ({ params: { asset } }) => {
 			return Bun.file(`./frontend/assets/${asset}`);
 		})
-		.get("/models", Bun.file("./frontend/models/index.html"))
 		.get("/room.json", () => room)
-		.get("/modelList", async ({ set }) => {
+		.get("/modelList", async ({ set, headers }) => {
 			try {
 				await mongo.connect();
 				const db = mongo.db("setup3d");
@@ -84,6 +92,9 @@ async function main() {
 						manufacturer: doc.manufacturer,
 					});
 				}
+
+				console.debug("Returning modelList to request with headers:");
+				console.debug(headers);
 
 				return docs;
 			} catch (e) {
@@ -245,6 +256,114 @@ async function main() {
 			set.status = "Not Found";
 			return "Not found";
 		})
+		.post(
+			"/login",
+			async ({ body, set }) => {
+				try {
+					const connect = await mongo.connect();
+					const db = connect.db("setup3d");
+					const col = db.collection<UserData>("authentication");
+					const doc = await col.findOne({ email: body.email });
+
+					if (doc === null) {
+						set.status = "Not Found";
+						return;
+					}
+
+					// Hash here
+					if (await Bun.password.verify(body.password, doc.passwordHash)) {
+						const uuid = crypto.randomUUID();
+
+						const col2 = db.collection<CookieDoc>("cookies");
+						await col2.insertOne({ email: body.email, cookie: uuid });
+
+						set.headers["Set-Cookie"] = `session-id=${uuid}`;
+
+						return;
+					}
+
+					set.status = "Unauthorized";
+				} catch (err) {
+					console.error("Error: ", err);
+
+					set.status = "Internal Server Error";
+				} finally {
+					mongo.close();
+				}
+			},
+			{
+				body: t.Object({
+					email: t.String(),
+					password: t.String(),
+					rememberMe: t.Optional(t.String()),
+				}),
+			},
+		)
+		.post(
+			"/signup",
+			async ({ body, set }) => {
+				try {
+					const connect = await mongo.connect();
+					const db = connect.db("setup3d");
+					const col = db.collection<UserData>("authentication");
+
+					await col.insertOne({
+						email: body.email,
+						passwordHash: await Bun.password.hash(body.password),
+					});
+					const uuid = crypto.randomUUID();
+
+					const col2 = db.collection("cookies");
+					await col2.insertOne({ email: body.email, cookie: uuid });
+
+					set.headers["Set-Cookie"] = `session-id=${uuid}`;
+
+					set.status = "Created";
+				} catch (err) {
+					console.error("Error: ", err);
+
+					set.status = "Internal Server Error";
+				} finally {
+					mongo.close();
+				}
+			},
+			{
+				body: t.Object({
+					email: t.String(),
+					password: t.String(),
+				}),
+			},
+		)
+		.post(
+			"/auth",
+			async ({ body, set }) => {
+				try {
+					const connect = await mongo.connect();
+					const db = connect.db("setup3d");
+					const col = db.collection<CookieDoc>("cookies");
+					const doc = await col.findOne({ cookie: body.sessionId });
+
+					if (doc) {
+						return { email: doc.email };
+					}
+
+					set.status = "Unauthorized";
+					return;
+				} catch (err) {
+					console.error(err);
+
+					set.status = "Internal Server Error";
+					return;
+				} finally {
+					mongo.close();
+				}
+			},
+			{
+				body: t.Object({
+					sessionId: t.String(),
+				}),
+			},
+		)
 		.onError((err) => {
 			console.error(err);
 		})
