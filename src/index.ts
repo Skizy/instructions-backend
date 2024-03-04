@@ -2,7 +2,6 @@ import { readdir, access } from "node:fs/promises";
 import { Elysia, t } from "elysia";
 import { Long, MongoClient, ObjectId } from "mongodb";
 import { cors } from "@elysiajs/cors";
-import room from "../public/room.json";
 import { Dirent } from "fs";
 import { $ } from "bun";
 
@@ -28,6 +27,7 @@ async function main() {
 	let config = {
 		port: 3005,
 		mongourl: "mongodb://localhost:27017",
+		datapath: `${import.meta.dir}/../../data`,
 	};
 
 	let envConfigPath = Bun.env.CONFIG_PATH;
@@ -65,10 +65,17 @@ async function main() {
 
 	const app = new Elysia()
 		// .use(cors())
-		.get("/assets/:asset", async ({ params: { asset } }) => {
-			return Bun.file(`./frontend/assets/${asset}`);
+		.get("/room.json", async () => {
+			let room: unknown;
+			try {
+				room = await Bun.file(`${config.datapath}/rooms/room.json`).json();
+			} catch (err) {
+				console.error(err);
+				room = {};
+			}
+
+			return room;
 		})
-		.get("/room.json", () => room)
 		.get("/modelList", async ({ set, headers }) => {
 			try {
 				await mongo.connect();
@@ -85,7 +92,7 @@ async function main() {
 					const id = doc._id.toHexString();
 
 					try {
-						access(`./assets/${id}/${doc.fileName}`);
+						access(`${config.datapath}/${id}/${doc.fileName}`);
 					} catch (e) {
 						console.error(`${doc.name} at ${doc.fileName} is not accessible`);
 						continue;
@@ -125,7 +132,7 @@ async function main() {
 					if (doc !== null) {
 						const fileName = doc.fileName;
 
-						const assetsPath = `./assets/${model}/deps`;
+						const assetsPath = `${config.datapath}/${model}/deps`;
 						let files: Dirent[];
 						try {
 							files = (
@@ -143,7 +150,7 @@ async function main() {
 						}
 
 						const fd = new FormData();
-						fd.append("file", Bun.file(`./assets/${model}/${fileName}`));
+						fd.append("file", Bun.file(`${config.datapath}/${model}/${fileName}`));
 						fd.append("fileName", fileName);
 
 						for (const file of files) {
@@ -206,29 +213,30 @@ async function main() {
 
 						console.log("creating a dir");
 						// await $`bash -c ${`mkdir -p ./assets/${id}/deps`}`;
-						await $`mkdir -p ./assets/${id}/deps`;
+						await $`mkdir -p ${config.datapath}/${id}/deps`;
 						console.log("created a dir");
 
-						await Bun.write(`./assets/${id}/${fileName}`, body.file);
+						await Bun.write(`${config.datapath}/${id}/${fileName}`, body.file);
 
 						if (body.assets !== undefined && body.assets.type.length > 0) {
-							$.cwd(`./assets/${id}/deps`);
+							const workingDirectory = await $`pwd`.text();
+							$.cwd(`${config.datapath}/${id}/deps`);
 							if (
 								body.assets.type === "application/gzip" ||
 								body.assets.type === "application/x-tar"
 							) {
-								const tmpFile = Bun.file(`./assets/${id}/.tmp.tar.gz`);
+								const tmpFile = Bun.file(`${config.datapath}/${id}/.tmp.tar.gz`);
 								await Bun.write(tmpFile, body.assets);
 								await $`tar -xf ../.tmp.tar.gz`;
 								await $`rm ../.tmp.tar.gz`;
 							} else if (body.assets.type === "application/zip") {
-								const tmpFile = Bun.file(`./assets/${id}/.tmp.zip`);
+								const tmpFile = Bun.file(`${config.datapath}/${id}/.tmp.zip`);
 								await Bun.write(tmpFile, body.assets);
 								await $`bsdtar -xf ../.tmp.zip`;
 								await $`rm ../.tmp.zip`;
 							}
 
-							$.cwd("../..");
+							$.cwd(workingDirectory);
 						}
 					} else {
 						throw new Error("Didn't get the id of the inserted document");
