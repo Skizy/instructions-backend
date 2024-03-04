@@ -33,7 +33,7 @@ async function main() {
 	let envConfigPath = Bun.env.CONFIG_PATH;
 
 	if (envConfigPath === undefined) {
-		envConfigPath = "../../config/server.json";
+		envConfigPath = `${import.meta.dir}/../../config/server.json`;
 	}
 
 	try {
