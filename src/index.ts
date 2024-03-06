@@ -15,6 +15,8 @@ type Model = {
 
 type UserData = {
 	email: string;
+	name: string;
+	avatarLink: string;
 	passwordHash: string;
 };
 
@@ -328,6 +330,8 @@ async function main() {
 
 					await col.insertOne({
 						email: body.email,
+						name: body.name,
+						avatarLink: "",
 						passwordHash: await Bun.password.hash(body.password),
 					});
 					const uuid = crypto.randomUUID();
@@ -349,6 +353,7 @@ async function main() {
 			{
 				body: t.Object({
 					email: t.String(),
+					name: t.String(),
 					password: t.String(),
 				}),
 			},
@@ -416,6 +421,45 @@ async function main() {
 				body: t.Object({
 					sessionId: t.String(),
 				}),
+			},
+		)
+		.post(
+			"/userData",
+			async ({ body, set }) => {
+				try {
+					const connect = await mongo.connect();
+					const db = connect.db("setup3d");
+					const cookiesCol = db.collection<CookieDoc>("cookies");
+					const doc = await cookiesCol.findOne({ cookie: body.sessionId });
+
+					if (doc) {
+						const userCol = db.collection<UserData>("authentication");
+						const user = await userCol.findOne({ email: doc.email });
+
+						if (user) {
+							return {
+								name: user.name,
+								email: user.email,
+								avatarLink: user.avatarLink,
+							};
+						}
+
+						set.status = "Not Found";
+					}
+
+					set.status = "Unauthorized";
+					return;
+				} catch (err) {
+					console.error(err);
+
+					set.status = "Internal Server Error";
+					return;
+				} finally {
+					mongo.close();
+				}
+			},
+			{
+				body: t.Object({ sessionId: t.String() }),
 			},
 		)
 		.onError((err) => {
