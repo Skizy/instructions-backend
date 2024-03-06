@@ -468,8 +468,11 @@ async function main() {
 				body: t.Object({ sessionId: t.String() }),
 			},
 		)
-		.onError((err) => {
-			console.error(err);
+		.onError(({ code, error, set }) => {
+			if (code === "VALIDATION") {
+				set.status = "Bad Request";
+			}
+			console.error(error);
 		})
 		.listen(config.port);
 
