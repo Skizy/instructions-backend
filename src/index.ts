@@ -150,7 +150,10 @@ async function main() {
 						}
 
 						const fd = new FormData();
-						fd.append("file", Bun.file(`${config.datapath}/${model}/${fileName}`));
+						fd.append(
+							"file",
+							Bun.file(`${config.datapath}/${model}/${fileName}`),
+						);
 						fd.append("fileName", fileName);
 
 						for (const file of files) {
@@ -225,7 +228,9 @@ async function main() {
 								body.assets.type === "application/gzip" ||
 								body.assets.type === "application/x-tar"
 							) {
-								const tmpFile = Bun.file(`${config.datapath}/${id}/.tmp.tar.gz`);
+								const tmpFile = Bun.file(
+									`${config.datapath}/${id}/.tmp.tar.gz`,
+								);
 								await Bun.write(tmpFile, body.assets);
 								await $`tar -xf ../.tmp.tar.gz`;
 								await $`rm ../.tmp.tar.gz`;
@@ -362,6 +367,41 @@ async function main() {
 					}
 
 					set.status = "Unauthorized";
+					return;
+				} catch (err) {
+					console.error(err);
+
+					set.status = "Internal Server Error";
+					return;
+				} finally {
+					mongo.close();
+				}
+			},
+			{
+				body: t.Object({
+					sessionId: t.String(),
+				}),
+			},
+		)
+		.delete(
+			"/logout",
+			async ({ body, set }) => {
+				try {
+					const connect = await mongo.connect();
+					const db = connect.db("setup3d");
+					const col = db.collection<CookieDoc>("cookies");
+
+					const doc = await col.deleteOne({ cookie: body.sessionId });
+					// const doc = await col.findOne({ cookie: body.sessionId });
+
+					if (doc.deletedCount === 1) {
+						set.headers["Set-Cookie"] =
+							`session-id=; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+
+						return;
+					}
+
+					set.status = "Bad Request";
 					return;
 				} catch (err) {
 					console.error(err);
