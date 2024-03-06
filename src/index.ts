@@ -1,7 +1,6 @@
 import { readdir, access } from "node:fs/promises";
 import { Elysia, t } from "elysia";
 import { Long, MongoClient, ObjectId } from "mongodb";
-import { cors } from "@elysiajs/cors";
 import { Dirent } from "fs";
 import { $ } from "bun";
 
@@ -10,6 +9,7 @@ type Model = {
 	manufacturer: string;
 	date: number | Long;
 	fileName: string;
+	uploader: string;
 	hidden?: boolean;
 };
 
@@ -18,6 +18,7 @@ type UserData = {
 	name: string;
 	avatarLink: string;
 	passwordHash: string;
+	uploadedModels: string[];
 };
 
 type CookieDoc = {
@@ -192,12 +193,34 @@ async function main() {
 		)
 		.post(
 			"/models",
-			async ({ body, set }) => {
+			async ({ body, cookie, set }) => {
+				if (!cookie["session-id"].get()) {
+					set.status = "Unauthorized";
+					return;
+				}
 				console.dir(body);
 
 				try {
 					await mongo.connect();
 					const db = mongo.db("setup3d");
+					const cookiesCol = db.collection<CookieDoc>("cookies");
+					const authDoc = await cookiesCol.findOne({
+						cookie: cookie["session-id"].get(),
+					});
+
+					if (!authDoc) {
+						set.status = "Unauthorized";
+						return;
+					}
+
+					const userCol = db.collection<UserData>("authentication");
+					const userDoc = await userCol.findOne({ email: authDoc.email });
+
+					if (!userDoc) {
+						set.status = "Internal Server Error";
+						return;
+					}
+
 					const col = db.collection<Model>("devcollection");
 
 					const fileName = body.file.name;
@@ -208,6 +231,8 @@ async function main() {
 						name: body.modelName,
 						manufacturer: body.manufacturer,
 						date,
+						// uploader: "",
+						uploader: userDoc._id.toHexString(),
 					});
 
 					if (result.insertedId !== null) {
@@ -217,11 +242,12 @@ async function main() {
 						const id = result.insertedId.toHexString();
 
 						console.log("creating a dir");
-						// await $`bash -c ${`mkdir -p ./assets/${id}/deps`}`;
 						await $`mkdir -p ${config.datapath}/${id}/deps`;
 						console.log("created a dir");
 
 						await Bun.write(`${config.datapath}/${id}/${fileName}`, body.file);
+
+						console.debug(body.assets);
 
 						if (body.assets !== undefined && body.assets.type.length > 0) {
 							const workingDirectory = await $`pwd`.text();
@@ -241,10 +267,17 @@ async function main() {
 								await Bun.write(tmpFile, body.assets);
 								await $`bsdtar -xf ../.tmp.zip`;
 								await $`rm ../.tmp.zip`;
+							} else {
+								console.error("Unknown assets file type: ", body.assets.type);
 							}
 
 							$.cwd(workingDirectory);
 						}
+
+						await userCol.updateOne(
+							{ _id: userDoc._id },
+							{ $addToSet: { uploadedModels: id } },
+						);
 					} else {
 						throw new Error("Didn't get the id of the inserted document");
 					}
@@ -339,6 +372,7 @@ async function main() {
 						name: body.name,
 						avatarLink: "",
 						passwordHash: await Bun.password.hash(body.password),
+						uploadedModels: [],
 					});
 					const uuid = crypto.randomUUID();
 
