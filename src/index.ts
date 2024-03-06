@@ -328,6 +328,12 @@ async function main() {
 					const db = connect.db("setup3d");
 					const col = db.collection<UserData>("authentication");
 
+					if (await col.findOne({ email: body.email })) {
+						set.status = "Conflict";
+
+						return;
+					}
+
 					await col.insertOne({
 						email: body.email,
 						name: body.name,
@@ -401,7 +407,7 @@ async function main() {
 
 					if (doc.deletedCount === 1) {
 						set.headers["Set-Cookie"] =
-							`session-id=; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+							"session-id=; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
 
 						return;
 					}
