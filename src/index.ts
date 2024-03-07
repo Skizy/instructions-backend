@@ -481,6 +481,7 @@ async function main() {
 								name: user.name,
 								email: user.email,
 								avatarLink: user.avatarLink,
+								uploadedModels: user.uploadedModels,
 							};
 						}
 
@@ -500,6 +501,39 @@ async function main() {
 			},
 			{
 				body: t.Object({ sessionId: t.String() }),
+			},
+		)
+		.post(
+			"/modelData",
+			async ({ set, body }) => {
+				try {
+					const connect = await mongo.connect();
+					const db = connect.db("setup3d");
+					const col = db.collection<Model>("devcollection");
+					const data = await col
+						.find({
+							_id: { $in: body.ids.map((x) => new ObjectId(x)) },
+						})
+						.map((doc) => ({
+							modelName: doc.name,
+							manufacturer: doc.manufacturer,
+							createdOn: doc.date,
+							id: doc._id.toHexString(),
+						}))
+						.toArray();
+
+					return data;
+				} catch (e) {
+					console.error(e);
+
+					set.status = "Internal Server Error";
+					return;
+				} finally {
+					mongo.close();
+				}
+			},
+			{
+				body: t.Object({ ids: t.Array(t.String()) }),
 			},
 		)
 		.onError(({ code, error, set }) => {
