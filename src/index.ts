@@ -27,27 +27,7 @@ type CookieDoc = {
 };
 
 async function main() {
-	let config = {
-		port: 3005,
-		mongourl: "mongodb://localhost:27017",
-		datapath: `${import.meta.dir}/../../data`,
-	};
-
-	let envConfigPath = Bun.env.CONFIG_PATH;
-
-	if (envConfigPath === undefined) {
-		envConfigPath = `${import.meta.dir}/../../config/server.json`;
-	}
-
-	try {
-		config = {
-			...config,
-			...(await Bun.file(envConfigPath).json()),
-		};
-	} catch (e) {
-		console.error(`Couldn't read config file: ${e}`);
-		console.log("Using default config");
-	}
+	const config = await loadConfig();
 
 	const mongo = new MongoClient(config.mongourl);
 
