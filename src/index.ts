@@ -48,6 +48,7 @@ async function main() {
 
 	const app = new Elysia()
 		// .use(cors())
+		.get("/ping", () => "pong")
 		.get("/room.json", async () => {
 			let room: unknown;
 			try {
