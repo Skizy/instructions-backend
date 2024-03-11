@@ -578,6 +578,39 @@ async function main() {
 				body: t.Object({ ids: t.Array(t.String()) }),
 			},
 		)
+		.post(
+			"/search",
+			async ({ body, set }) => {
+				const q = body.query;
+
+				try {
+					await mongo.connect();
+					const db = mongo.db("setup3d");
+					const col = db.collection<Model>("devcollection");
+					const res = await col
+						.find({
+							$or: [
+								{ name: { $regex: q, $options: "i" } },
+								{ manufacturer: { $regex: q, $options: "i" } },
+								{ uploader: { $regex: q, $options: "i" } },
+							],
+							hidden: { $not: { $eq: true } },
+						})
+						.limit(10)
+						.toArray();
+
+					return res;
+				} catch (e) {
+					set.status = "Internal Server Error";
+					return;
+				} finally {
+					mongo.close();
+				}
+			},
+			{
+				body: t.Object({ query: t.String() }),
+			},
+		)
 		.onError(({ code, error, set }) => {
 			if (code === "VALIDATION") {
 				set.status = "Bad Request";
