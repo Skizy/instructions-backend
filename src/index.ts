@@ -281,6 +281,67 @@ async function main() {
 				}),
 			},
 		)
+		.delete(
+			"/models/:id",
+			async ({ params: { id }, set, body }) => {
+				try {
+					await mongo.connect();
+					const db = mongo.db("setup3d");
+					const cookiesCol = db.collection<CookieDoc>("cookies");
+					const doc = await cookiesCol.findOne({ cookie: body.sessionId });
+
+					if (!doc) {
+						set.status = "Unauthorized";
+						return;
+					}
+
+					const userCol = db.collection<UserData>("authentication");
+					const user = await userCol.findOne({ email: doc.email });
+
+					if (!user || !user.uploadedModels.includes(id)) {
+						set.status = "Unauthorized";
+						return;
+					}
+
+					const modelCol = db.collection<Model>("devcollection");
+
+					const { exitCode, stderr } =
+						await $`mv ${config.datapath}/${id} ${config.datapath}/trash`.quiet();
+					if (exitCode !== 0) {
+						throw new Error(
+							`Process exited with code ${exitCode}. stderr: ${String.fromCharCode(
+								...stderr,
+							)}`,
+						);
+					}
+
+					const result = await modelCol.deleteOne({
+						_id: ObjectId.createFromHexString(id),
+					});
+					if (result.deletedCount !== 1) {
+						throw "Failed to delete the model document from the database";
+					}
+
+					const result2 = await userCol.updateOne(
+						{ _id: user._id },
+						{ $pull: { uploadedModels: id } },
+					);
+					if (result2.modifiedCount !== 1) {
+						throw "Failed to remove the model id from the user's document";
+					}
+				} catch (e) {
+					console.error(e);
+					set.status = "Internal Server Error";
+
+					return;
+				} finally {
+					mongo.close();
+				}
+			},
+			{
+				body: t.Object({ sessionId: t.String() }),
+			},
+		)
 		.get("/:asset", async ({ params: { asset }, set }) => {
 			const file = Bun.file(`./frontend/${asset}`);
 			if (await file.exists()) {
