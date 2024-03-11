@@ -4,7 +4,8 @@
 	"main": "./src/index.ts",
 	"scripts": {
 		"test": "echo \"Error: no test specified\" && exit 1",
-		"dev": "bun run --watch src/index.ts"
+		"dev": "bun run --watch src/index.ts",
+		"server": "bun run src/index.ts"
 	},
 	"dependencies": {
 		"elysia": "^0.8.15",
