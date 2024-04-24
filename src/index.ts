@@ -1,7 +1,7 @@
 import { readdir, access } from "node:fs/promises";
 import { Elysia, t } from "elysia";
 import { Long, MongoClient, ObjectId } from "mongodb";
-import { Dirent } from "fs";
+import type { Dirent } from "node:fs";
 import { $ } from "bun";
 
 type Model = {
