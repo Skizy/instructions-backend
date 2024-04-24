@@ -13,12 +13,19 @@ type Model = {
 	hidden?: boolean;
 };
 
+type RigData = {
+	name: string;
+	date: number | Long;
+	uploader: string;
+};
+
 type UserData = {
 	email: string;
 	name: string;
 	avatarLink: string;
 	passwordHash: string;
 	uploadedModels: string[];
+	uploadedRigDataList: string[];
 };
 
 type CookieDoc = {
@@ -415,6 +422,7 @@ async function main() {
 						avatarLink: "",
 						passwordHash: await Bun.password.hash(body.password),
 						uploadedModels: [],
+						uploadedRigDataList: [],
 					});
 					const uuid = crypto.randomUUID();
 
@@ -610,6 +618,72 @@ async function main() {
 			{
 				body: t.Object({ query: t.String() }),
 			},
+		)
+		.post(
+			"/uploadRigData",
+			async ({ body, set, cookie }) => {
+				if (!cookie["session-id"].get()) {
+					set.status = "Unauthorized";
+					return;
+				}
+				console.dir(body);
+
+				try {
+					await mongo.connect();
+					const db = mongo.db("setup3d");
+					const cookiesCol = db.collection<CookieDoc>("cookies");
+					const authDoc = await cookiesCol.findOne({
+						cookie: cookie["session-id"].get(),
+					});
+
+					if (!authDoc) {
+						set.status = "Unauthorized";
+						return;
+					}
+
+					const userCol = db.collection<UserData>("authentication");
+					const userDoc = await userCol.findOne({ email: authDoc.email });
+
+					if (!userDoc) {
+						set.status = "Internal Server Error";
+						return;
+					}
+
+					const col = db.collection<RigData>("rigdata");
+
+					const date = new Long(BigInt(Date.now()));
+
+					const result = await col.insertOne({
+						name: body.name,
+						uploader: userDoc._id.toHexString(),
+						date,
+					});
+
+					if (result.insertedId !== null) {
+						console.log("Writing the file");
+						const id = result.insertedId.toHexString();
+
+						await Bun.write(`${config.datapath}/rigData/${id}.json`, body.file);
+
+						await userCol.updateOne(
+							{ _id: userDoc._id },
+							{ $addToSet: { uploadedRigDataList: id } },
+						);
+					} else {
+						throw new Error("Didn't get the id of the inserted document");
+					}
+				} catch (e) {
+					console.error(e);
+					set.status = "Internal Server Error";
+					return;
+				} finally {
+					await mongo.close();
+				}
+
+				set.status = "Created";
+				return;
+			},
+			{ body: t.Object({ name: t.String(), file: t.File() }) },
 		)
 		.onError(({ code, error, set }) => {
 			if (code === "VALIDATION") {
