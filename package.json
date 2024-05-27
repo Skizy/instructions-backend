@@ -8,11 +8,11 @@
 		"server": "bun run src/index.ts"
 	},
 	"dependencies": {
-		"elysia": "^0.8.15",
-		"mongodb": "^6.3.0"
+		"elysia": "^1.0.22",
+		"mongodb": "^6.6.2"
 	},
 	"devDependencies": {
-		"bun-types": "latest"
+		"@types/bun": "latest"
 	},
 	"module": "src/index.js"
 }

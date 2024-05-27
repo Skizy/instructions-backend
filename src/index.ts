@@ -182,7 +182,8 @@ async function main() {
 		.post(
 			"/models",
 			async ({ body, cookie, set }) => {
-				if (!cookie["session-id"].get()) {
+				const sessionId = cookie["session-id"];
+				if (!sessionId.value) {
 					set.status = "Unauthorized";
 					return;
 				}
@@ -193,7 +194,7 @@ async function main() {
 					const db = mongo.db("setup3d");
 					const cookiesCol = db.collection<CookieDoc>("cookies");
 					const authDoc = await cookiesCol.findOne({
-						cookie: cookie["session-id"].get(),
+						cookie: sessionId.value,
 					});
 
 					if (!authDoc) {
@@ -622,7 +623,8 @@ async function main() {
 		.post(
 			"/uploadRigData",
 			async ({ body, set, cookie }) => {
-				if (!cookie["session-id"].get()) {
+				const sessionId = cookie["session-id"];
+				if (!sessionId.value) {
 					set.status = "Unauthorized";
 					return;
 				}
@@ -633,7 +635,7 @@ async function main() {
 					const db = mongo.db("setup3d");
 					const cookiesCol = db.collection<CookieDoc>("cookies");
 					const authDoc = await cookiesCol.findOne({
-						cookie: cookie["session-id"].get(),
+						cookie: sessionId.value,
 					});
 
 					if (!authDoc) {
