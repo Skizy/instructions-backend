@@ -1,18 +1,18 @@
 {
-	"name": "backend",
-	"version": "1.0.50",
-	"main": "./src/index.ts",
-	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1",
-		"dev": "bun run --watch src/index.ts",
-		"server": "bun run src/index.ts"
-	},
-	"dependencies": {
-		"elysia": "^1.0.22",
-		"mongodb": "^6.6.2"
-	},
-	"devDependencies": {
-		"@types/bun": "latest"
-	},
-	"module": "src/index.js"
+  "name": "backend",
+  "version": "1.0.50",
+  "main": "./src/index.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "bun run --watch src/index.ts",
+    "server": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "elysia": "^1.0.22",
+    "mongodb": "^6.7.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "module": "src/index.js"
 }
