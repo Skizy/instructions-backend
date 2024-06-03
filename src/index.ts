@@ -647,6 +647,72 @@ async function main() {
 			},
 			{ body: t.Object({ name: t.String(), file: t.File() }) },
 		)
+		.get("/rigData", async ({ set, cookie }) => {
+			const sessionId = cookie["session-id"];
+			if (!sessionId.value) {
+				set.status = "Unauthorized";
+				return;
+			}
+
+			console.log("Responding with rigData");
+
+			try {
+				const db = mongo.db("setup3d");
+				const cookiesCol = db.collection<CookieDoc>("cookies");
+				const authDoc = await cookiesCol.findOne({
+					cookie: sessionId.value,
+				});
+
+				if (!authDoc) {
+					set.status = "Unauthorized";
+					return;
+				}
+
+				const userCol = db.collection<UserData>("authentication");
+				const userDoc = await userCol.findOne({ email: authDoc.email });
+
+				if (!userDoc) {
+					set.status = "Internal Server Error";
+					return;
+				}
+
+				const col = db.collection<RigData>("rigdata");
+
+				const results = await col
+					.find({ uploader: userDoc._id.toHexString() })
+					.map((doc) => ({
+						id: doc._id.toHexString(),
+						name: doc.name,
+						date: doc.date,
+					}))
+					.toArray();
+
+				return results;
+			} catch (e) {
+				console.error(e);
+				set.status = "Internal Server Error";
+				return;
+			}
+		})
+		.get("/rigData/:id", async ({ params: { id }, set }) => {
+			try {
+				const db = mongo.db("setup3d");
+				const col = db.collection<RigData>("rigdata");
+
+				const result = await col.findOne({ _id: new ObjectId(id) });
+
+				if (!result) {
+					set.status = "Bad Request";
+					return;
+				}
+
+				return Bun.file(`${config.datapath}/rigData/${id}.json`);
+			} catch (e) {
+				console.error(e);
+				set.status = "Internal Server Error";
+				return;
+			}
+		})
 		.onError(({ code, error, set }) => {
 			if (code === "VALIDATION") {
 				set.status = "Bad Request";
