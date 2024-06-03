@@ -42,15 +42,11 @@ async function main() {
 
 	console.debug(date);
 
-	try {
-		const db = mongo.db("setup3d");
-		const col = db.collection<Model>("devcollection");
+	const db = mongo.db("setup3d");
+	const col = db.collection<Model>("devcollection");
 
-		for await (const doc of col.find()) {
-			console.dir(doc);
-		}
-	} finally {
-		await mongo.close();
+	for await (const doc of col.find()) {
+		console.dir(doc);
 	}
 
 	const app = new Elysia()
@@ -69,7 +65,6 @@ async function main() {
 		})
 		.get("/modelList", async ({ set, headers }) => {
 			try {
-				await mongo.connect();
 				const db = mongo.db("setup3d");
 				const col = db.collection<Model>("devcollection");
 				const cur = col.find({ hidden: { $not: { $eq: true } } });
@@ -105,8 +100,6 @@ async function main() {
 				console.error(e);
 				set.status = "Internal Server Error";
 				return;
-			} finally {
-				await mongo.close();
 			}
 		})
 		.get(
@@ -115,7 +108,6 @@ async function main() {
 				const id = new ObjectId(model);
 
 				try {
-					await mongo.connect();
 					const db = mongo.db("setup3d");
 					const col = db.collection<Model>("devcollection");
 
@@ -167,8 +159,6 @@ async function main() {
 					console.error(e);
 					set.status = "Internal Server Error";
 					return;
-				} finally {
-					await mongo.close();
 				}
 
 				set.status = "Not Found";
@@ -190,7 +180,6 @@ async function main() {
 				console.dir(body);
 
 				try {
-					await mongo.connect();
 					const db = mongo.db("setup3d");
 					const cookiesCol = db.collection<CookieDoc>("cookies");
 					const authDoc = await cookiesCol.findOne({
@@ -274,8 +263,6 @@ async function main() {
 					console.error(e);
 					set.status = "Internal Server Error";
 					return;
-				} finally {
-					await mongo.close();
 				}
 
 				set.status = "Created";
@@ -294,7 +281,6 @@ async function main() {
 			"/models/:id",
 			async ({ params: { id }, set, body }) => {
 				try {
-					await mongo.connect();
 					const db = mongo.db("setup3d");
 					const cookiesCol = db.collection<CookieDoc>("cookies");
 					const doc = await cookiesCol.findOne({ cookie: body.sessionId });
@@ -343,8 +329,6 @@ async function main() {
 					set.status = "Internal Server Error";
 
 					return;
-				} finally {
-					mongo.close();
 				}
 			},
 			{
@@ -364,8 +348,7 @@ async function main() {
 			"/login",
 			async ({ body, set }) => {
 				try {
-					const connect = await mongo.connect();
-					const db = connect.db("setup3d");
+					const db = mongo.db("setup3d");
 					const col = db.collection<UserData>("authentication");
 					const doc = await col.findOne({ email: body.email });
 
@@ -391,8 +374,6 @@ async function main() {
 					console.error("Error: ", err);
 
 					set.status = "Internal Server Error";
-				} finally {
-					mongo.close();
 				}
 			},
 			{
@@ -407,8 +388,7 @@ async function main() {
 			"/signup",
 			async ({ body, set }) => {
 				try {
-					const connect = await mongo.connect();
-					const db = connect.db("setup3d");
+					const db = mongo.db("setup3d");
 					const col = db.collection<UserData>("authentication");
 
 					if (await col.findOne({ email: body.email })) {
@@ -437,8 +417,6 @@ async function main() {
 					console.error("Error: ", err);
 
 					set.status = "Internal Server Error";
-				} finally {
-					mongo.close();
 				}
 			},
 			{
@@ -453,8 +431,7 @@ async function main() {
 			"/auth",
 			async ({ body, set }) => {
 				try {
-					const connect = await mongo.connect();
-					const db = connect.db("setup3d");
+					const db = mongo.db("setup3d");
 					const col = db.collection<CookieDoc>("cookies");
 					const doc = await col.findOne({ cookie: body.sessionId });
 
@@ -469,8 +446,6 @@ async function main() {
 
 					set.status = "Internal Server Error";
 					return;
-				} finally {
-					mongo.close();
 				}
 			},
 			{
@@ -483,8 +458,7 @@ async function main() {
 			"/logout",
 			async ({ body, set }) => {
 				try {
-					const connect = await mongo.connect();
-					const db = connect.db("setup3d");
+					const db = mongo.db("setup3d");
 					const col = db.collection<CookieDoc>("cookies");
 
 					const doc = await col.deleteOne({ cookie: body.sessionId });
@@ -504,8 +478,6 @@ async function main() {
 
 					set.status = "Internal Server Error";
 					return;
-				} finally {
-					mongo.close();
 				}
 			},
 			{
@@ -518,8 +490,7 @@ async function main() {
 			"/userData",
 			async ({ body, set }) => {
 				try {
-					const connect = await mongo.connect();
-					const db = connect.db("setup3d");
+					const db = mongo.db("setup3d");
 					const cookiesCol = db.collection<CookieDoc>("cookies");
 					const doc = await cookiesCol.findOne({ cookie: body.sessionId });
 
@@ -546,8 +517,6 @@ async function main() {
 
 					set.status = "Internal Server Error";
 					return;
-				} finally {
-					mongo.close();
 				}
 			},
 			{
@@ -558,8 +527,7 @@ async function main() {
 			"/modelData",
 			async ({ set, body }) => {
 				try {
-					const connect = await mongo.connect();
-					const db = connect.db("setup3d");
+					const db = mongo.db("setup3d");
 					const col = db.collection<Model>("devcollection");
 					const data = await col
 						.find({
@@ -579,8 +547,6 @@ async function main() {
 
 					set.status = "Internal Server Error";
 					return;
-				} finally {
-					mongo.close();
 				}
 			},
 			{
@@ -593,7 +559,6 @@ async function main() {
 				const q = body.query;
 
 				try {
-					await mongo.connect();
 					const db = mongo.db("setup3d");
 					const col = db.collection<Model>("devcollection");
 					const res = await col
@@ -612,8 +577,6 @@ async function main() {
 				} catch (e) {
 					set.status = "Internal Server Error";
 					return;
-				} finally {
-					mongo.close();
 				}
 			},
 			{
@@ -631,7 +594,6 @@ async function main() {
 				console.dir(body);
 
 				try {
-					await mongo.connect();
 					const db = mongo.db("setup3d");
 					const cookiesCol = db.collection<CookieDoc>("cookies");
 					const authDoc = await cookiesCol.findOne({
@@ -678,8 +640,6 @@ async function main() {
 					console.error(e);
 					set.status = "Internal Server Error";
 					return;
-				} finally {
-					await mongo.close();
 				}
 
 				set.status = "Created";
