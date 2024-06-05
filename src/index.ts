@@ -1,5 +1,5 @@
 import { readdir, access } from "node:fs/promises";
-import { Elysia, t } from "elysia";
+import { type Cookie, Elysia, t } from "elysia";
 import { Long, MongoClient, ObjectId } from "mongodb";
 import type { Dirent } from "node:fs";
 import { $ } from "bun";
@@ -26,6 +26,7 @@ type UserData = {
 	passwordHash: string;
 	uploadedModels: string[];
 	uploadedRigDataList: string[];
+	selectedRigModel?: { id: string; name: string };
 };
 
 type CookieDoc = {
@@ -51,7 +52,9 @@ async function main() {
 
 	const app = new Elysia()
 		// .use(cors())
+		// /ping
 		.get("/ping", () => "pong")
+		// /room.json
 		.get("/room.json", async () => {
 			let room: unknown;
 			try {
@@ -63,6 +66,7 @@ async function main() {
 
 			return room;
 		})
+		// /modelList
 		.get("/modelList", async ({ set, headers }) => {
 			try {
 				const db = mongo.db("setup3d");
@@ -78,7 +82,7 @@ async function main() {
 					const id = doc._id.toHexString();
 
 					try {
-						access(`${config.datapath}/${id}/${doc.fileName}`);
+						access(`${config.datapath}/models/${id}/${doc.fileName}`);
 					} catch (e) {
 						console.error(`${doc.name} at ${doc.fileName} is not accessible`);
 						continue;
@@ -102,6 +106,7 @@ async function main() {
 				return;
 			}
 		})
+		// /models/:model
 		.get(
 			"/models/:model",
 			async ({ params: { model }, set }) => {
@@ -115,7 +120,7 @@ async function main() {
 					if (doc !== null) {
 						const fileName = doc.fileName;
 
-						const assetsPath = `${config.datapath}/${model}/deps`;
+						const assetsPath = `${config.datapath}/models/${model}/deps`;
 						let files: Dirent[];
 						try {
 							files = (
@@ -135,7 +140,7 @@ async function main() {
 						const fd = new FormData();
 						fd.append(
 							"file",
-							Bun.file(`${config.datapath}/${model}/${fileName}`),
+							Bun.file(`${config.datapath}/models/${model}/${fileName}`),
 						);
 						fd.append("fileName", fileName);
 
@@ -169,6 +174,7 @@ async function main() {
 				type: "multipart/form-data",
 			},
 		)
+		// /models
 		.post(
 			"/models",
 			async ({ body, cookie, set }) => {
@@ -220,28 +226,33 @@ async function main() {
 						const id = result.insertedId.toHexString();
 
 						console.log("creating a dir");
-						await $`mkdir -p ${config.datapath}/${id}/deps`;
+						await $`mkdir -p ${config.datapath}/models/${id}/deps`;
 						console.log("created a dir");
 
-						await Bun.write(`${config.datapath}/${id}/${fileName}`, body.file);
+						await Bun.write(
+							`${config.datapath}/models/${id}/${fileName}`,
+							body.file,
+						);
 
 						console.debug(body.assets);
 
 						if (body.assets !== undefined && body.assets.type.length > 0) {
 							const workingDirectory = await $`pwd`.text();
-							$.cwd(`${config.datapath}/${id}/deps`);
+							$.cwd(`${config.datapath}/models/${id}/deps`);
 							if (
 								body.assets.type === "application/gzip" ||
 								body.assets.type === "application/x-tar"
 							) {
 								const tmpFile = Bun.file(
-									`${config.datapath}/${id}/.tmp.tar.gz`,
+									`${config.datapath}/models/${id}/.tmp.tar.gz`,
 								);
 								await Bun.write(tmpFile, body.assets);
 								await $`tar -xf ../.tmp.tar.gz`;
 								await $`rm ../.tmp.tar.gz`;
 							} else if (body.assets.type === "application/zip") {
-								const tmpFile = Bun.file(`${config.datapath}/${id}/.tmp.zip`);
+								const tmpFile = Bun.file(
+									`${config.datapath}/models/${id}/.tmp.zip`,
+								);
 								await Bun.write(tmpFile, body.assets);
 								await $`bsdtar -xf ../.tmp.zip`;
 								await $`rm ../.tmp.zip`;
@@ -277,6 +288,7 @@ async function main() {
 				}),
 			},
 		)
+		// /models/:id
 		.delete(
 			"/models/:id",
 			async ({ params: { id }, set, body }) => {
@@ -301,7 +313,7 @@ async function main() {
 					const modelCol = db.collection<Model>("devcollection");
 
 					const { exitCode, stderr } =
-						await $`mv ${config.datapath}/${id} ${config.datapath}/trash`.quiet();
+						await $`mv ${config.datapath}/models/${id} ${config.datapath}/trash`.quiet();
 					if (exitCode !== 0) {
 						throw new Error(
 							`Process exited with code ${exitCode}. stderr: ${String.fromCharCode(
@@ -335,6 +347,7 @@ async function main() {
 				body: t.Object({ sessionId: t.String() }),
 			},
 		)
+		// /:asset
 		.get("/:asset", async ({ params: { asset }, set }) => {
 			const file = Bun.file(`./frontend/${asset}`);
 			if (await file.exists()) {
@@ -344,6 +357,7 @@ async function main() {
 			set.status = "Not Found";
 			return "Not found";
 		})
+		// /login
 		.post(
 			"/login",
 			async ({ body, set }) => {
@@ -384,6 +398,7 @@ async function main() {
 				}),
 			},
 		)
+		// /signup
 		.post(
 			"/signup",
 			async ({ body, set }) => {
@@ -427,6 +442,7 @@ async function main() {
 				}),
 			},
 		)
+		// /auth
 		.post(
 			"/auth",
 			async ({ body, set }) => {
@@ -454,6 +470,7 @@ async function main() {
 				}),
 			},
 		)
+		// /logout
 		.delete(
 			"/logout",
 			async ({ body, set }) => {
@@ -486,6 +503,7 @@ async function main() {
 				}),
 			},
 		)
+		// /userData
 		.post(
 			"/userData",
 			async ({ body, set }) => {
@@ -523,6 +541,7 @@ async function main() {
 				body: t.Object({ sessionId: t.String() }),
 			},
 		)
+		// /modelData
 		.post(
 			"/modelData",
 			async ({ set, body }) => {
@@ -553,6 +572,7 @@ async function main() {
 				body: t.Object({ ids: t.Array(t.String()) }),
 			},
 		)
+		// /search
 		.post(
 			"/search",
 			async ({ body, set }) => {
@@ -583,6 +603,7 @@ async function main() {
 				body: t.Object({ query: t.String() }),
 			},
 		)
+		// /uploadRigData
 		.post(
 			"/uploadRigData",
 			async ({ body, set, cookie }) => {
@@ -647,6 +668,7 @@ async function main() {
 			},
 			{ body: t.Object({ name: t.String(), file: t.File() }) },
 		)
+		// /rigData
 		.get("/rigData", async ({ set, cookie }) => {
 			const sessionId = cookie["session-id"];
 			if (!sessionId.value) {
@@ -694,6 +716,7 @@ async function main() {
 				return;
 			}
 		})
+		// /rigData/:id
 		.get("/rigData/:id", async ({ params: { id }, set }) => {
 			try {
 				const db = mongo.db("setup3d");
@@ -713,6 +736,124 @@ async function main() {
 				return;
 			}
 		})
+		// /change-model
+		.post(
+			"/change-model",
+			async ({ set, body, cookie }) => {
+				// Should delete the old model I guess?
+
+				const [userDoc, err] = await authenticate(cookie, mongo);
+				if (err) {
+					handleAuthError(err, set);
+					return;
+				}
+
+				const uuid = crypto.randomUUID();
+
+				try {
+					await Bun.write(
+						`${config.datapath}/rigModels/${uuid}.glb`,
+						body["model-file"],
+					);
+
+					const userCol = db.collection<UserData>("authentication");
+
+					const result = await userCol.updateOne(userDoc, {
+						$set: { selectedRigModel: { id: uuid, name: body.name } },
+					});
+					if (result.modifiedCount === 1) {
+						console.log(
+							`Successfully update the rig model of ${userDoc.email}`,
+						);
+
+						return;
+					}
+
+					set.status = "Internal Server Error";
+
+					return;
+				} catch (err) {
+					console.error(err);
+
+					set.status = "Internal Server Error";
+
+					return;
+				}
+			},
+			{
+				body: t.Object({
+					"model-file": t.File(),
+					name: t.String(),
+				}),
+			},
+		)
+		// /current-model
+		.get("/current-model", async ({ set, cookie }) => {
+			const sessionId = cookie["session-id"];
+			if (!sessionId.value) {
+				set.status = "Unauthorized";
+				return;
+			}
+
+			try {
+				const db = mongo.db("setup3d");
+				const cookiesCol = db.collection<CookieDoc>("cookies");
+				const authDoc = await cookiesCol.findOne({
+					cookie: sessionId.value,
+				});
+
+				if (!authDoc) {
+					set.status = "Unauthorized";
+					return;
+				}
+
+				const userCol = db.collection<UserData>("authentication");
+				const userDoc = await userCol.findOne({ email: authDoc.email });
+
+				if (!userDoc) {
+					set.status = "Internal Server Error";
+					return;
+				}
+
+				if (!userDoc.selectedRigModel) {
+					return Bun.file(`${config.datapath}/rigModels/default.glb`);
+				}
+
+				try {
+					access(
+						`${config.datapath}/rigModels/${userDoc.selectedRigModel.id}.glb`,
+					);
+				} catch (e) {
+					console.error(`${userDoc.selectedRigModel} is not accessible`);
+
+					set.status = "Internal Server Error";
+					return;
+				}
+
+				return Bun.file(
+					`${config.datapath}/rigModels/${userDoc.selectedRigModel.id}.glb`,
+				);
+			} catch (e) {
+				console.error(e);
+				set.status = "Internal Server Error";
+				return;
+			}
+		})
+		.get("/current-model-name", async ({ cookie, set }) => {
+			const [userDoc, err] = await authenticate(cookie, mongo);
+			if (err) {
+				handleAuthError(err, set);
+				return;
+			}
+
+			if (!userDoc.selectedRigModel) {
+				set.status = "Bad Request";
+
+				return;
+			}
+
+			return userDoc.selectedRigModel.name;
+		})
 		.onError(({ code, error, set }) => {
 			if (code === "VALIDATION") {
 				set.status = "Bad Request";
@@ -726,6 +867,76 @@ async function main() {
 	);
 
 	return app;
+}
+
+type AnyError = {
+	code: number;
+	message: string;
+};
+
+async function authenticate(
+	// biome-ignore lint/suspicious/noExplicitAny: the function signature of elysia handler
+	cookie: Record<string, Cookie<any>>,
+	mongo: MongoClient,
+) {
+	const sessionId = cookie["session-id"];
+	if (!sessionId.value) {
+		return [null, { code: 0, message: "Unauthorized" } as AnyError] as const;
+	}
+
+	try {
+		const db = mongo.db("setup3d");
+		const cookiesCol = db.collection<CookieDoc>("cookies");
+		const authDoc = await cookiesCol.findOne({
+			cookie: sessionId.value,
+		});
+
+		if (!authDoc) {
+			return [null, { code: 0, message: "Unauthorized" } as AnyError] as const;
+		}
+
+		const userCol = db.collection<UserData>("authentication");
+		const userDoc = await userCol.findOne({ email: authDoc.email });
+
+		if (!userDoc) {
+			return [
+				null,
+				{ code: 1, message: "No doc in user col" } as AnyError,
+			] as const;
+		}
+
+		return [userDoc, null] as const;
+	} catch (e) {
+		let message = "";
+		if (typeof e === "string") {
+			message = e;
+		} else if (e instanceof Error) {
+			message = e.message;
+		}
+		return [null, { code: 2, message: e } as AnyError] as const;
+	}
+}
+
+function handleAuthError(
+	err: AnyError,
+	set: { status?: undefined | number | string },
+) {
+	switch (err.code) {
+		case 0: {
+			set.status = "Unauthorized";
+
+			break;
+		}
+		// biome-ignore lint/suspicious/noFallthroughSwitchClause:
+		case 2: {
+			console.error(err.message);
+		}
+		case 1: {
+			set.status = "Internal Server Error";
+
+			break;
+		}
+	}
 }
 
 async function loadConfig() {
