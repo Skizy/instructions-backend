@@ -8,7 +8,8 @@
     "server": "bun run src/index.ts"
   },
   "dependencies": {
-    "elysia": "^1.0.22",
+    "@elysiajs/stream": "^1.0.2",
+    "elysia": "^1.0.25",
     "mongodb": "^6.7.0"
   },
   "devDependencies": {

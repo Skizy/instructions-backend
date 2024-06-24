@@ -1,8 +1,14 @@
-import { readdir, access } from "node:fs/promises";
-import { type Cookie, Elysia, t } from "elysia";
-import { Long, MongoClient, ObjectId } from "mongodb";
 import type { Dirent } from "node:fs";
+import { access, readdir } from "node:fs/promises";
+
+import { Stream } from "@elysiajs/stream";
+import { type Cookie, Elysia, t } from "elysia";
+
+import { Long, MongoClient, ObjectId } from "mongodb";
+
 import { $ } from "bun";
+
+import { ClientMessage, ClientMessageType } from "socket-types";
 
 type Model = {
 	name: string;
@@ -27,11 +33,22 @@ type UserData = {
 	uploadedModels: string[];
 	uploadedRigDataList: string[];
 	selectedRigModel?: { id: string; name: string };
+	cameras?: { uuid: string }[];
 };
 
 type CookieDoc = {
 	email: string;
 	cookie: string;
+};
+
+/** Status:
+ *  0 - inactive
+ *  1 - active
+ *  2 - used */
+type ExternalCamera = {
+	uuid: string;
+	expires: number;
+	status: 0 | 1 | 2;
 };
 
 async function main() {
@@ -847,6 +864,154 @@ async function main() {
 			}
 
 			return userDoc.selectedRigModel.name;
+		})
+		.get("/generate-external-camera-id", async ({ set, cookie, mongo }) => {
+			const [doc, err] = await authenticate(cookie, mongo);
+			if (err) {
+				handleAuthError(err, set);
+
+				return;
+			}
+
+			const uuid = crypto.randomUUID();
+			const expires = Date.now() + 24 * 60 * 60 * 1000;
+
+			const db = mongo.db("setup3d");
+
+			const userCol = db.collection<UserData>("authentication");
+			const result = await userCol.updateOne(
+				{ _id: { $eq: doc._id } },
+				{ $addToSet: { cameras: { uuid } } },
+			);
+
+			if (result.modifiedCount !== 1) {
+				set.status = "Internal Server Error";
+
+				return;
+			}
+
+			const cameraCol = db.collection<ExternalCamera>("cameras");
+			const camResult = await cameraCol.insertOne({ uuid, expires, status: 0 });
+
+			if (!camResult.acknowledged) {
+				await userCol.updateOne(
+					{ _id: { $eq: doc._id } },
+					{ $pull: { cameras: { uuid } } },
+				);
+
+				set.status = "Internal Server Error";
+
+				return;
+			}
+
+			return uuid;
+		})
+		.get("/external-cameras", async ({ set, cookie, mongo }) => {
+			const [doc, err] = await authenticate(cookie, mongo);
+
+			if (err) {
+				handleAuthError(err, set);
+
+				return;
+			}
+
+			const db = mongo.db("setup3d");
+			const col = db.collection<ExternalCamera>("cameras");
+			const result = col.find({
+				uuid: { $in: doc.cameras?.map((cam) => cam.uuid) },
+			});
+
+			return await result.toArray();
+		})
+		.get("/cameras-stream", async ({ set, cookie, mongo, camStreams }) => {
+			const [doc, err] = await authenticate(cookie, mongo);
+
+			if (err) {
+				handleAuthError(err, set);
+
+				return;
+			}
+
+			const stream = new Stream<string>();
+			stream.event = "update";
+
+			stream.send("ping");
+
+			setTimeout(() => {
+				stream.send("ping 2");
+			}, 1000);
+
+			camStreams.set(doc._id.toHexString(), stream);
+
+			console.log(`Creating a stream of ${doc.email}`);
+
+			return stream;
+		})
+		.get("/close-stream", async ({ set, cookie, mongo, camStreams }) => {
+			const [doc, err] = await authenticate(cookie, mongo);
+
+			if (err) {
+				handleAuthError(err, set);
+
+				return;
+			}
+
+			console.log(`Closing stream of ${doc.email}`);
+
+			camStreams.delete(doc._id.toHexString());
+		})
+		.ws("/camera-socket", {
+			async message(ws, message) {
+				switch (message.type) {
+					case ClientMessageType.UUID: {
+						console.log("Opening message of uuid", message.uuid);
+
+						ws.subscribe(message.uuid);
+
+						break;
+					}
+					case ClientMessageType.StateUpdate: {
+						const db = ws.data.mongo.db("setup3d");
+						const col = db.collection<ExternalCamera>("cameras");
+
+						col.updateOne(
+							{ uuid: { $eq: message.uuid } },
+							{ $set: { status: message.available ? 1 : 0 } },
+						);
+
+						// Get the owner document id
+						const authCol = db.collection<UserData>("authentication");
+						const result = await authCol.findOne({
+							cameras: { uuid: message.uuid },
+						});
+						if (result) {
+							const stream = ws.data.camStreams.get(result._id.toHexString());
+							if (stream) {
+								console.log("Sending state update for uuid", message.uuid);
+
+								stream.send(
+									JSON.stringify({
+										type: "state",
+										uuid: message.uuid,
+										state: message.available ? 1 : 0,
+									}),
+								);
+							}
+						}
+
+						break;
+					}
+					case ClientMessageType.Free: {
+						console.log("Free message:", message.message);
+						break;
+					}
+					case ClientMessageType.ToggleResponse: {
+						console.log("Camera toggle recording succeded:", message.success);
+						break;
+					}
+				}
+			},
+			body: ClientMessage,
 		})
 		.onError(({ code, error, set }) => {
 			if (code === "VALIDATION") {
