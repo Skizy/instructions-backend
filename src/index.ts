@@ -37,21 +37,10 @@ type CookieDoc = {
 async function main() {
 	const config = await loadConfig();
 
-	const mongo = new MongoClient(config.mongourl);
-
-	const date = new Long(BigInt(Date.now()));
-
-	console.debug(date);
-
-	const db = mongo.db("setup3d");
-	const col = db.collection<Model>("devcollection");
-
-	for await (const doc of col.find()) {
-		console.dir(doc);
-	}
-
 	const app = new Elysia()
 		// .use(cors())
+		.decorate("camStreams", new Map<string, Stream<string>>())
+		.decorate("mongo", new MongoClient(config.mongourl))
 		// /ping
 		.get("/ping", () => "pong")
 		// /room.json
@@ -67,7 +56,7 @@ async function main() {
 			return room;
 		})
 		// /modelList
-		.get("/modelList", async ({ set, headers }) => {
+		.get("/modelList", async ({ set, headers, mongo }) => {
 			try {
 				const db = mongo.db("setup3d");
 				const col = db.collection<Model>("devcollection");
@@ -109,7 +98,7 @@ async function main() {
 		// /models/:model
 		.get(
 			"/models/:model",
-			async ({ params: { model }, set }) => {
+			async ({ params: { model }, set, mongo }) => {
 				const id = new ObjectId(model);
 
 				try {
@@ -177,7 +166,7 @@ async function main() {
 		// /models
 		.post(
 			"/models",
-			async ({ body, cookie, set }) => {
+			async ({ body, cookie, set, mongo }) => {
 				const sessionId = cookie["session-id"];
 				if (!sessionId.value) {
 					set.status = "Unauthorized";
@@ -291,7 +280,7 @@ async function main() {
 		// /models/:id
 		.delete(
 			"/models/:id",
-			async ({ params: { id }, set, body }) => {
+			async ({ params: { id }, set, body, mongo }) => {
 				try {
 					const db = mongo.db("setup3d");
 					const cookiesCol = db.collection<CookieDoc>("cookies");
@@ -360,7 +349,7 @@ async function main() {
 		// /login
 		.post(
 			"/login",
-			async ({ body, set }) => {
+			async ({ body, set, mongo }) => {
 				try {
 					const db = mongo.db("setup3d");
 					const col = db.collection<UserData>("authentication");
@@ -378,7 +367,11 @@ async function main() {
 						const col2 = db.collection<CookieDoc>("cookies");
 						await col2.insertOne({ email: body.email, cookie: uuid });
 
-						set.headers["Set-Cookie"] = `session-id=${uuid}`;
+						const date = new Date(Date.now());
+						date.setDate(date.getDate() + 3);
+
+						set.headers["Set-Cookie"] =
+							`session-id=${uuid}; Expires=${date.toUTCString()}`;
 
 						return;
 					}
@@ -401,7 +394,7 @@ async function main() {
 		// /signup
 		.post(
 			"/signup",
-			async ({ body, set }) => {
+			async ({ body, set, mongo }) => {
 				try {
 					const db = mongo.db("setup3d");
 					const col = db.collection<UserData>("authentication");
@@ -445,7 +438,7 @@ async function main() {
 		// /auth
 		.post(
 			"/auth",
-			async ({ body, set }) => {
+			async ({ body, set, mongo }) => {
 				try {
 					const db = mongo.db("setup3d");
 					const col = db.collection<CookieDoc>("cookies");
@@ -473,7 +466,7 @@ async function main() {
 		// /logout
 		.delete(
 			"/logout",
-			async ({ body, set }) => {
+			async ({ body, set, mongo }) => {
 				try {
 					const db = mongo.db("setup3d");
 					const col = db.collection<CookieDoc>("cookies");
@@ -506,7 +499,7 @@ async function main() {
 		// /userData
 		.post(
 			"/userData",
-			async ({ body, set }) => {
+			async ({ body, set, mongo }) => {
 				try {
 					const db = mongo.db("setup3d");
 					const cookiesCol = db.collection<CookieDoc>("cookies");
@@ -544,7 +537,7 @@ async function main() {
 		// /modelData
 		.post(
 			"/modelData",
-			async ({ set, body }) => {
+			async ({ set, body, mongo }) => {
 				try {
 					const db = mongo.db("setup3d");
 					const col = db.collection<Model>("devcollection");
@@ -575,7 +568,7 @@ async function main() {
 		// /search
 		.post(
 			"/search",
-			async ({ body, set }) => {
+			async ({ body, set, mongo }) => {
 				const q = body.query;
 
 				try {
@@ -606,7 +599,7 @@ async function main() {
 		// /uploadRigData
 		.post(
 			"/uploadRigData",
-			async ({ body, set, cookie }) => {
+			async ({ body, set, cookie, mongo }) => {
 				const sessionId = cookie["session-id"];
 				if (!sessionId.value) {
 					set.status = "Unauthorized";
@@ -669,7 +662,7 @@ async function main() {
 			{ body: t.Object({ name: t.String(), file: t.File() }) },
 		)
 		// /rigData
-		.get("/rigData", async ({ set, cookie }) => {
+		.get("/rigData", async ({ set, cookie, mongo }) => {
 			const sessionId = cookie["session-id"];
 			if (!sessionId.value) {
 				set.status = "Unauthorized";
@@ -717,7 +710,7 @@ async function main() {
 			}
 		})
 		// /rigData/:id
-		.get("/rigData/:id", async ({ params: { id }, set }) => {
+		.get("/rigData/:id", async ({ params: { id }, set, mongo }) => {
 			try {
 				const db = mongo.db("setup3d");
 				const col = db.collection<RigData>("rigdata");
@@ -739,7 +732,7 @@ async function main() {
 		// /change-model
 		.post(
 			"/change-model",
-			async ({ set, body, cookie }) => {
+			async ({ set, body, cookie, mongo }) => {
 				// Should delete the old model I guess?
 
 				const [userDoc, err] = await authenticate(cookie, mongo);
@@ -756,6 +749,7 @@ async function main() {
 						body["model-file"],
 					);
 
+					const db = mongo.db("setup3d");
 					const userCol = db.collection<UserData>("authentication");
 
 					const result = await userCol.updateOne(userDoc, {
@@ -788,7 +782,7 @@ async function main() {
 			},
 		)
 		// /current-model
-		.get("/current-model", async ({ set, cookie }) => {
+		.get("/current-model", async ({ set, cookie, mongo }) => {
 			const sessionId = cookie["session-id"];
 			if (!sessionId.value) {
 				set.status = "Unauthorized";
@@ -839,7 +833,7 @@ async function main() {
 				return;
 			}
 		})
-		.get("/current-model-name", async ({ cookie, set }) => {
+		.get("/current-model-name", async ({ cookie, set, mongo }) => {
 			const [userDoc, err] = await authenticate(cookie, mongo);
 			if (err) {
 				handleAuthError(err, set);
