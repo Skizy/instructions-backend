@@ -2,13 +2,19 @@ import type { Dirent } from "node:fs";
 import { access, readdir } from "node:fs/promises";
 
 import { Stream } from "@elysiajs/stream";
-import { type Cookie, Elysia, t } from "elysia";
+import { type Cookie, Elysia, type Static, t } from "elysia";
+import { TypeCompiler } from "elysia/type-system";
 
 import { Long, MongoClient, ObjectId } from "mongodb";
 
 import { $ } from "bun";
 
-import { ClientMessage, ClientMessageType } from "socket-types";
+import {
+	ClientMessage,
+	ClientMessageType,
+	type ServerMessage,
+	ServerMessageType,
+} from "socket-types";
 
 type Model = {
 	name: string;
@@ -33,7 +39,7 @@ type UserData = {
 	uploadedModels: string[];
 	uploadedRigDataList: string[];
 	selectedRigModel?: { id: string; name: string };
-	cameras?: { uuid: string }[];
+	cameras?: string[];
 };
 
 type CookieDoc = {
@@ -51,7 +57,14 @@ type ExternalCamera = {
 	status: 0 | 1 | 2;
 };
 
+const ClientMessageCompiled = TypeCompiler.Compile(ClientMessage);
+
 async function main() {
+	/** @returns `boolean` - sent successfully */
+	function sendToSocket(uuid: string, message: Static<typeof ServerMessage>) {
+		return (app.server?.publish(uuid, JSON.stringify(message)) ?? 0) > 0;
+	}
+
 	const config = await loadConfig();
 
 	const app = new Elysia()
@@ -881,7 +894,7 @@ async function main() {
 			const userCol = db.collection<UserData>("authentication");
 			const result = await userCol.updateOne(
 				{ _id: { $eq: doc._id } },
-				{ $addToSet: { cameras: { uuid } } },
+				{ $addToSet: { cameras: uuid } },
 			);
 
 			if (result.modifiedCount !== 1) {
@@ -918,7 +931,7 @@ async function main() {
 			const db = mongo.db("setup3d");
 			const col = db.collection<ExternalCamera>("cameras");
 			const result = col.find({
-				uuid: { $in: doc.cameras?.map((cam) => cam.uuid) },
+				uuid: { $in: doc.cameras },
 			});
 
 			return await result.toArray();
@@ -960,11 +973,104 @@ async function main() {
 
 			camStreams.delete(doc._id.toHexString());
 		})
+		.post(
+			"/start-cameras",
+			async ({ set, cookie, mongo, body }) => {
+				const [doc, err] = await authenticate(cookie, mongo);
+
+				if (err) {
+					handleAuthError(err, set);
+
+					return;
+				}
+
+				if (body.some((cam) => !(doc.cameras?.includes(cam) ?? false))) {
+					set.status = "Unauthorized";
+
+					return;
+				}
+
+				const db = mongo.db("setup3d");
+				const col = db.collection<ExternalCamera>("cameras");
+				const toEnable = await col.find({ uuid: { $in: body } }).toArray();
+
+				if (toEnable.some((x) => x.status !== 1)) {
+					set.status = "Bad Request";
+
+					return;
+				}
+
+				for (let i = 0; i < body.length; i += 1) {
+					const result = sendToSocket(body[i], {
+						type: ServerMessageType.Start,
+					});
+
+					if (!result) {
+						for (let j = 0; j < i; j += 1) {
+							sendToSocket(body[j], {
+								type: ServerMessageType.Stop,
+								sendVideo: false,
+							});
+						}
+
+						set.status = "Internal Server Error";
+
+						return;
+					}
+				}
+
+				col.updateMany({ uuid: { $in: body } }, { $set: { status: 2 } });
+			},
+			{
+				body: t.Array(t.String()),
+			},
+		)
+		.post("/stop-cameras", async ({ set, cookie, mongo }) => {
+			const [doc, err] = await authenticate(cookie, mongo);
+
+			if (err) {
+				handleAuthError(err, set);
+
+				return;
+			}
+
+			const db = mongo.db("setup3d");
+			const col = db.collection<ExternalCamera>("cameras");
+
+			const active = await col
+				.find({ $and: [{ uuid: { $in: doc.cameras } }, { status: 2 }] })
+				.toArray();
+
+			for (const cam of active) {
+				sendToSocket(cam.uuid, {
+					type: ServerMessageType.Stop,
+					sendVideo: true,
+				});
+			}
+
+			await col.updateMany(
+				{ uuid: { $in: active.map((x) => x.uuid) } },
+				{ $set: { status: 1 } },
+			);
+		})
+		.decorate("idToUUID", new Map<string, string>())
 		.ws("/camera-socket", {
 			async message(ws, message) {
+				if (message instanceof Buffer) {
+					console.log("Received a Buffer in the websocket:", message);
+
+					return;
+				}
+
+				if (!ClientMessageCompiled.Check(message)) {
+					return;
+				}
+
 				switch (message.type) {
 					case ClientMessageType.UUID: {
 						console.log("Opening message of uuid", message.uuid);
+
+						ws.data.idToUUID.set(ws.id, message.uuid);
 
 						ws.subscribe(message.uuid);
 
@@ -976,13 +1082,13 @@ async function main() {
 
 						col.updateOne(
 							{ uuid: { $eq: message.uuid } },
-							{ $set: { status: message.available ? 1 : 0 } },
+							{ $set: { status: message.state } },
 						);
 
 						// Get the owner document id
 						const authCol = db.collection<UserData>("authentication");
 						const result = await authCol.findOne({
-							cameras: { uuid: message.uuid },
+							cameras: message.uuid,
 						});
 						if (result) {
 							const stream = ws.data.camStreams.get(result._id.toHexString());
@@ -993,7 +1099,7 @@ async function main() {
 									JSON.stringify({
 										type: "state",
 										uuid: message.uuid,
-										state: message.available ? 1 : 0,
+										state: message.state,
 									}),
 								);
 							}
@@ -1011,7 +1117,35 @@ async function main() {
 					}
 				}
 			},
-			body: ClientMessage,
+			async close(ws, _code, _message) {
+				const uuid = ws.data.idToUUID.get(ws.id);
+
+				if (uuid) {
+					const db = ws.data.mongo.db("setup3d");
+					const col = db.collection<ExternalCamera>("cameras");
+					col.updateOne({ uuid }, { $set: { status: 0 } });
+
+					ws.data.idToUUID.delete(ws.id);
+
+					const authCol = db.collection<UserData>("authentication");
+					const result = await authCol.findOne({
+						cameras: uuid,
+					});
+					if (result) {
+						const stream = ws.data.camStreams.get(result._id.toHexString());
+						if (stream) {
+							stream.send(
+								JSON.stringify({
+									type: "state",
+									uuid: uuid,
+									state: 0,
+								}),
+							);
+						}
+					}
+				}
+			},
+			// body: ClientMessage,
 		})
 		.onError(({ code, error, set }) => {
 			if (code === "VALIDATION") {
