@@ -1115,6 +1115,19 @@ async function main() {
 						console.log("Camera toggle recording succeded:", message.success);
 						break;
 					}
+					case ClientMessageType.Ping: {
+						ws.send(
+							JSON.stringify({
+								type: ServerMessageType.Pong,
+							} satisfies Static<typeof ServerMessage>),
+						);
+						break;
+					}
+					default: {
+						throw new Error(
+							`Unknown message type of message: ${JSON.stringify(message satisfies never)}`,
+						);
+					}
 				}
 			},
 			async close(ws, _code, _message) {
@@ -1228,6 +1241,9 @@ function handleAuthError(
 			set.status = "Internal Server Error";
 
 			break;
+		}
+		default: {
+			console.warn(`Unknown AnyError code: ${err.code}. Error:`, err);
 		}
 	}
 }
