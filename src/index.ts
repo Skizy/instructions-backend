@@ -1070,6 +1070,29 @@ async function main() {
 					case ClientMessageType.UUID: {
 						console.log("Opening message of uuid", message.uuid);
 
+						const db = ws.data.mongo.db("setup3d");
+						const col = db.collection<ExternalCamera>("cameras");
+						const doc = await col.findOne({ uuid: message.uuid });
+
+						if (doc === null) {
+							ws.send(
+								JSON.stringify({
+									type: ServerMessageType.UUIDConfirmation,
+									exists: false,
+								} satisfies Static<typeof ServerMessage>),
+							);
+							ws.close();
+
+							break;
+						}
+
+						ws.send(
+							JSON.stringify({
+								type: ServerMessageType.UUIDConfirmation,
+								exists: true,
+							} satisfies Static<typeof ServerMessage>),
+						);
+
 						ws.data.idToUUID.set(ws.id, message.uuid);
 
 						ws.subscribe(message.uuid);
