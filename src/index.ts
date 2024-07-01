@@ -984,7 +984,9 @@ async function main() {
 					return;
 				}
 
-				if (body.some((cam) => !(doc.cameras?.includes(cam) ?? false))) {
+				const ids = body.ids;
+
+				if (ids.some((cam) => !(doc.cameras?.includes(cam) ?? false))) {
 					set.status = "Unauthorized";
 
 					return;
@@ -992,7 +994,7 @@ async function main() {
 
 				const db = mongo.db("setup3d");
 				const col = db.collection<ExternalCamera>("cameras");
-				const toEnable = await col.find({ uuid: { $in: body } }).toArray();
+				const toEnable = await col.find({ uuid: { $in: ids } }).toArray();
 
 				if (toEnable.some((x) => x.status !== 1)) {
 					set.status = "Bad Request";
@@ -1000,14 +1002,15 @@ async function main() {
 					return;
 				}
 
-				for (let i = 0; i < body.length; i += 1) {
-					const result = sendToSocket(body[i], {
+				for (let i = 0; i < ids.length; i += 1) {
+					const result = sendToSocket(ids[i], {
 						type: ServerMessageType.Start,
+						fps: body.fps,
 					});
 
 					if (!result) {
 						for (let j = 0; j < i; j += 1) {
-							sendToSocket(body[j], {
+							sendToSocket(ids[j], {
 								type: ServerMessageType.Stop,
 								sendVideo: false,
 							});
@@ -1019,10 +1022,10 @@ async function main() {
 					}
 				}
 
-				col.updateMany({ uuid: { $in: body } }, { $set: { status: 2 } });
+				col.updateMany({ uuid: { $in: ids } }, { $set: { status: 2 } });
 			},
 			{
-				body: t.Array(t.String()),
+				body: t.Object({ ids: t.Array(t.String()), fps: t.Number() }),
 			},
 		)
 		.post("/stop-cameras", async ({ set, cookie, mongo }) => {
@@ -1144,6 +1147,13 @@ async function main() {
 								type: ServerMessageType.Pong,
 							} satisfies Static<typeof ServerMessage>),
 						);
+						break;
+					}
+					case ClientMessageType.PoseData: {
+						const data = message.data;
+
+						console.log("Received Pose data:", data);
+
 						break;
 					}
 					default: {
