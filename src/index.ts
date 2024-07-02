@@ -10,6 +10,8 @@ import { Long, MongoClient, ObjectId } from "mongodb";
 import { $ } from "bun";
 
 import {
+	type CameraStreamMessageT,
+	CameraStreamMessageType,
 	ClientMessage,
 	ClientMessageType,
 	type ServerMessage,
@@ -59,6 +61,12 @@ type ExternalCamera = {
 
 const ClientMessageCompiled = TypeCompiler.Compile(ClientMessage);
 
+type CameraStream = {
+	raw: Stream<string>;
+	send: (val: CameraStreamMessageT) => void;
+	intervalId: Timer;
+};
+
 async function main() {
 	/** @returns `boolean` - sent successfully */
 	function sendToSocket(uuid: string, message: Static<typeof ServerMessage>) {
@@ -69,7 +77,7 @@ async function main() {
 
 	const app = new Elysia()
 		// .use(cors())
-		.decorate("camStreams", new Map<string, Stream<string>>())
+		.decorate("camStreams", new Map<string, CameraStream>())
 		.decorate("mongo", new MongoClient(config.mongourl))
 		// /ping
 		.get("/ping", () => "pong")
@@ -946,15 +954,24 @@ async function main() {
 			}
 
 			const stream = new Stream<string>();
-			stream.event = "update";
+			stream.event = "message";
 
-			stream.send("ping");
+			const send = (val: CameraStreamMessageT) =>
+				stream.send(JSON.stringify(val));
 
-			setTimeout(() => {
-				stream.send("ping 2");
+			send({ type: CameraStreamMessageType.Ping });
+
+			const timer = setInterval(() => {
+				send({ type: CameraStreamMessageType.Ping });
 			}, 1000);
 
-			camStreams.set(doc._id.toHexString(), stream);
+			const cameraStream: CameraStream = {
+				raw: stream,
+				send,
+				intervalId: timer,
+			};
+
+			camStreams.set(doc._id.toHexString(), cameraStream);
 
 			console.log(`Creating a stream of ${doc.email}`);
 
@@ -1121,13 +1138,11 @@ async function main() {
 							if (stream) {
 								console.log("Sending state update for uuid", message.uuid);
 
-								stream.send(
-									JSON.stringify({
-										type: "state",
-										uuid: message.uuid,
-										state: message.state,
-									}),
-								);
+								stream.send({
+									type: CameraStreamMessageType.StateUpdate,
+									uuid: message.uuid,
+									state: message.state,
+								});
 							}
 						}
 
@@ -1180,13 +1195,11 @@ async function main() {
 					if (result) {
 						const stream = ws.data.camStreams.get(result._id.toHexString());
 						if (stream) {
-							stream.send(
-								JSON.stringify({
-									type: "state",
-									uuid: uuid,
-									state: 0,
-								}),
-							);
+							stream.send({
+								type: CameraStreamMessageType.StateUpdate,
+								uuid: uuid,
+								state: 0,
+							});
 						}
 					}
 				}
