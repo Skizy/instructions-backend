@@ -1095,11 +1095,13 @@ async function main() {
 						const col = db.collection<ExternalCamera>("cameras");
 						const doc = await col.findOne({ uuid: message.uuid });
 
-						if (doc === null) {
+						if (doc === null || doc.status !== CameraState.Uninitialized) {
+							const error = doc === null ? "NotFound" : "InUse";
 							ws.send(
 								JSON.stringify({
 									type: ServerMessageType.UUIDConfirmation,
-									exists: false,
+									success: false,
+									error,
 								} satisfies Static<typeof ServerMessage>),
 							);
 							ws.close();
@@ -1130,7 +1132,7 @@ async function main() {
 						ws.send(
 							JSON.stringify({
 								type: ServerMessageType.UUIDConfirmation,
-								exists: true,
+								success: true,
 							} satisfies Static<typeof ServerMessage>),
 						);
 
