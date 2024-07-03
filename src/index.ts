@@ -10,13 +10,14 @@ import { Long, MongoClient, ObjectId } from "mongodb";
 import { $ } from "bun";
 
 import {
+	CameraState,
 	type CameraStreamMessageT,
 	CameraStreamMessageType,
 	ClientMessage,
 	ClientMessageType,
 	type ServerMessage,
 	ServerMessageType,
-} from "socket-types";
+} from "custom-types";
 
 type Model = {
 	name: string;
@@ -56,7 +57,7 @@ type CookieDoc = {
 type ExternalCamera = {
 	uuid: string;
 	expires: number;
-	status: 0 | 1 | 2;
+	status: CameraState;
 };
 
 const ClientMessageCompiled = TypeCompiler.Compile(ClientMessage);
@@ -963,7 +964,7 @@ async function main() {
 
 			const timer = setInterval(() => {
 				send({ type: CameraStreamMessageType.Ping });
-			}, 1000);
+			}, 2000);
 
 			const cameraStream: CameraStream = {
 				raw: stream,
@@ -1106,6 +1107,26 @@ async function main() {
 							break;
 						}
 
+						await col.updateOne(
+							{ _id: doc._id },
+							{ $set: { status: CameraState.Waiting } },
+						);
+
+						const authCol = db.collection<UserData>("authentication");
+						const result = await authCol.findOne({
+							cameras: doc.uuid,
+						});
+						if (result) {
+							const stream = ws.data.camStreams.get(result._id.toHexString());
+							if (stream) {
+								stream.send({
+									type: CameraStreamMessageType.StateUpdate,
+									uuid: doc.uuid,
+									state: CameraState.Waiting,
+								});
+							}
+						}
+
 						ws.send(
 							JSON.stringify({
 								type: ServerMessageType.UUIDConfirmation,
@@ -1184,7 +1205,10 @@ async function main() {
 				if (uuid) {
 					const db = ws.data.mongo.db("setup3d");
 					const col = db.collection<ExternalCamera>("cameras");
-					col.updateOne({ uuid }, { $set: { status: 0 } });
+					col.updateOne(
+						{ uuid },
+						{ $set: { status: CameraState.Uninitialized } },
+					);
 
 					ws.data.idToUUID.delete(ws.id);
 
@@ -1197,8 +1221,8 @@ async function main() {
 						if (stream) {
 							stream.send({
 								type: CameraStreamMessageType.StateUpdate,
-								uuid: uuid,
-								state: 0,
+								uuid,
+								state: CameraState.Uninitialized,
 							});
 						}
 					}
