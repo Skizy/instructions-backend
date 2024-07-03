@@ -80,6 +80,7 @@ async function main() {
 		// .use(cors())
 		.decorate("camStreams", new Map<string, CameraStream>())
 		.decorate("mongo", new MongoClient(config.mongourl))
+		.decorate("timeouts", new Map<string, { reset: boolean; timer: Timer }>())
 		// /ping
 		.get("/ping", () => "pong")
 		// /room.json
@@ -1140,6 +1141,30 @@ async function main() {
 
 						ws.subscribe(message.uuid);
 
+						const timer = setInterval(() => {
+							const timeout = ws.data.timeouts.get(ws.id);
+							if (!timeout) {
+								ws.close();
+								clearInterval(timer);
+								return;
+							}
+
+							if (timeout.reset) {
+								timeout.reset = false;
+							} else {
+								console.log(
+									`Lost connection to camera with id ${message.uuid}`,
+								);
+								ws.data.timeouts.delete(ws.id);
+								ws.close();
+								clearInterval(timeout.timer);
+							}
+						}, 5000);
+						ws.data.timeouts.set(ws.id, {
+							reset: false,
+							timer,
+						});
+
 						break;
 					}
 					case ClientMessageType.StateUpdate: {
@@ -1180,6 +1205,11 @@ async function main() {
 						break;
 					}
 					case ClientMessageType.Ping: {
+						const timeout = ws.data.timeouts.get(ws.id);
+						if (timeout) {
+							timeout.reset = true;
+						}
+
 						ws.send(
 							JSON.stringify({
 								type: ServerMessageType.Pong,
@@ -1229,8 +1259,14 @@ async function main() {
 						}
 					}
 				}
+
+				const timeout = ws.data.timeouts.get(ws.id);
+				if (timeout) {
+					clearInterval(timeout.timer);
+
+					ws.data.timeouts.delete(ws.id);
+				}
 			},
-			// body: ClientMessage,
 		})
 		.onError(({ code, error, set }) => {
 			if (code === "VALIDATION") {
