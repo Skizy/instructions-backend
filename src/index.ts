@@ -914,7 +914,11 @@ async function main() {
 			}
 
 			const cameraCol = db.collection<ExternalCamera>("cameras");
-			const camResult = await cameraCol.insertOne({ uuid, expires, status: 0 });
+			const camResult = await cameraCol.insertOne({
+				uuid,
+				expires,
+				status: CameraState.Uninitialized,
+			});
 
 			if (!camResult.acknowledged) {
 				await userCol.updateOne(
@@ -929,7 +933,7 @@ async function main() {
 
 			return uuid;
 		})
-		.get("/external-cameras", async ({ set, cookie, mongo }) => {
+		.get("/external-cameras", async ({ set, cookie, mongo, camStreams }) => {
 			const [doc, err] = await authenticate(cookie, mongo);
 
 			if (err) {
@@ -944,7 +948,25 @@ async function main() {
 				uuid: { $in: doc.cameras },
 			});
 
-			return await result.toArray();
+			const filtered: ExternalCamera[] = [];
+			const now = Date.now();
+			for await (const cam of result) {
+				if (cam.expires < now) {
+					col.deleteOne({ _id: cam._id });
+
+					const stream = camStreams.get(doc._id.toHexString());
+					if (stream) {
+						stream.send({
+							type: CameraStreamMessageType.Delete,
+							uuid: cam.uuid,
+						});
+					}
+				} else {
+					filtered.push(cam);
+				}
+			}
+
+			return filtered;
 		})
 		.get("/cameras-stream", async ({ set, cookie, mongo, camStreams }) => {
 			const [doc, err] = await authenticate(cookie, mongo);
