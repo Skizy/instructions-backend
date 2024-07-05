@@ -58,6 +58,7 @@ type ExternalCamera = {
 	uuid: string;
 	expires: number;
 	status: CameraState;
+	userAgent: string | null;
 };
 
 const ClientMessageCompiled = TypeCompiler.Compile(ClientMessage);
@@ -918,6 +919,7 @@ async function main() {
 				uuid,
 				expires,
 				status: CameraState.Uninitialized,
+				userAgent: null,
 			});
 
 			if (!camResult.acknowledged) {
@@ -1134,7 +1136,12 @@ async function main() {
 
 						await col.updateOne(
 							{ _id: doc._id },
-							{ $set: { status: CameraState.Waiting } },
+							{
+								$set: {
+									status: CameraState.Waiting,
+									userAgent: message.userAgent,
+								},
+							},
 						);
 
 						const authCol = db.collection<UserData>("authentication");
@@ -1148,6 +1155,7 @@ async function main() {
 									type: CameraStreamMessageType.StateUpdate,
 									uuid: doc.uuid,
 									state: CameraState.Waiting,
+									userAgent: message.userAgent,
 								});
 							}
 						}
@@ -1261,7 +1269,9 @@ async function main() {
 					const col = db.collection<ExternalCamera>("cameras");
 					col.updateOne(
 						{ uuid },
-						{ $set: { status: CameraState.Uninitialized } },
+						{
+							$set: { status: CameraState.Uninitialized, userAgent: undefined },
+						},
 					);
 
 					ws.data.idToUUID.delete(ws.id);
