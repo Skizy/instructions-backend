@@ -319,64 +319,64 @@ async function main() {
 			},
 		)
 		// /models/:id
-		.delete(
-			"/models/:id",
-			async ({ params: { id }, set, body, mongo }) => {
-				try {
-					const db = mongo.db("setup3d");
-					const cookiesCol = db.collection<CookieDoc>("cookies");
-					const doc = await cookiesCol.findOne({ cookie: body.sessionId });
+		.delete("/models/:id", async ({ params: { id }, set, cookie, mongo }) => {
+			const sessionId = cookie["session-id"];
+			if (!sessionId.value) {
+				set.status = "Unauthorized";
+				return;
+			}
 
-					if (!doc) {
-						set.status = "Unauthorized";
-						return;
-					}
+			try {
+				const db = mongo.db("setup3d");
+				const cookiesCol = db.collection<CookieDoc>("cookies");
+				const doc = await cookiesCol.findOne({ cookie: sessionId.value });
 
-					const userCol = db.collection<UserData>("authentication");
-					const user = await userCol.findOne({ email: doc.email });
-
-					if (!user || !user.uploadedModels.includes(id)) {
-						set.status = "Unauthorized";
-						return;
-					}
-
-					const modelCol = db.collection<Model>("devcollection");
-
-					const { exitCode, stderr } =
-						await $`mv ${config.datapath}/models/${id} ${config.datapath}/trash`.quiet();
-					if (exitCode !== 0) {
-						throw new Error(
-							`Process exited with code ${exitCode}. stderr: ${String.fromCharCode(
-								...stderr,
-							)}`,
-						);
-					}
-
-					const result = await modelCol.deleteOne({
-						_id: ObjectId.createFromHexString(id),
-					});
-					if (result.deletedCount !== 1) {
-						throw "Failed to delete the model document from the database";
-					}
-
-					const result2 = await userCol.updateOne(
-						{ _id: user._id },
-						{ $pull: { uploadedModels: id } },
-					);
-					if (result2.modifiedCount !== 1) {
-						throw "Failed to remove the model id from the user's document";
-					}
-				} catch (e) {
-					console.error(e);
-					set.status = "Internal Server Error";
-
+				if (!doc) {
+					set.status = "Unauthorized";
 					return;
 				}
-			},
-			{
-				body: t.Object({ sessionId: t.String() }),
-			},
-		)
+
+				const userCol = db.collection<UserData>("authentication");
+				const user = await userCol.findOne({ email: doc.email });
+
+				if (!user || !user.uploadedModels.includes(id)) {
+					set.status = "Unauthorized";
+					return;
+				}
+
+				const modelCol = db.collection<Model>("devcollection");
+
+				const { exitCode, stderr } =
+					await $`mv ${config.datapath}/models/${id} ${config.datapath}/trash`.quiet();
+				if (exitCode !== 0) {
+					throw new Error(
+						`Process exited with code ${exitCode}. stderr: ${String.fromCharCode(
+							...stderr,
+						)}`,
+					);
+				}
+
+				const result = await modelCol.deleteOne({
+					_id: ObjectId.createFromHexString(id),
+				});
+				if (result.deletedCount !== 1) {
+					throw "Failed to delete the model document from the database";
+				}
+
+				const result2 = await userCol.updateOne(
+					{ _id: user._id },
+					{ $pull: { uploadedModels: id } },
+				);
+				if (result2.modifiedCount !== 1) {
+					throw "Failed to remove the model id from the user's document";
+				}
+			} catch (e) {
+				console.error(e);
+				set.status = "Internal Server Error";
+
+				return;
+			}
+		})
 		// /:asset
 		.get("/:asset", async ({ params: { asset }, set }) => {
 			const file = Bun.file(`./frontend/${asset}`);
@@ -477,66 +477,61 @@ async function main() {
 			},
 		)
 		// /auth
-		.post(
-			"/auth",
-			async ({ body, set, mongo }) => {
-				try {
-					const db = mongo.db("setup3d");
-					const col = db.collection<CookieDoc>("cookies");
-					const doc = await col.findOne({ cookie: body.sessionId });
+		.get("/auth", async ({ set, cookie, mongo }) => {
+			const sessionId = cookie["session-id"];
+			if (!sessionId.value) {
+				set.status = "Unauthorized";
+				return;
+			}
 
-					if (doc) {
-						return { email: doc.email };
-					}
+			try {
+				const db = mongo.db("setup3d");
+				const col = db.collection<CookieDoc>("cookies");
+				const doc = await col.findOne({ cookie: sessionId.value });
 
-					set.status = "Unauthorized";
-					return;
-				} catch (err) {
-					console.error(err);
-
-					set.status = "Internal Server Error";
-					return;
+				if (doc) {
+					return { email: doc.email };
 				}
-			},
-			{
-				body: t.Object({
-					sessionId: t.String(),
-				}),
-			},
-		)
+				console.log(doc);
+
+				set.status = "Unauthorized";
+				return;
+			} catch (err) {
+				console.error(err);
+
+				set.status = "Internal Server Error";
+				return;
+			}
+		})
 		// /logout
-		.delete(
-			"/logout",
-			async ({ body, set, mongo }) => {
-				try {
-					const db = mongo.db("setup3d");
-					const col = db.collection<CookieDoc>("cookies");
+		.delete("/logout", async ({ set, cookie, mongo }) => {
+			const sessionId = cookie["session-id"];
+			if (!sessionId.value) {
+				set.status = "Unauthorized";
+				return;
+			}
+			try {
+				const db = mongo.db("setup3d");
+				const col = db.collection<CookieDoc>("cookies");
 
-					const doc = await col.deleteOne({ cookie: body.sessionId });
-					// const doc = await col.findOne({ cookie: body.sessionId });
+				const doc = await col.deleteOne({ cookie: sessionId.value });
 
-					if (doc.deletedCount === 1) {
-						set.headers["Set-Cookie"] =
-							"session-id=; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+				if (doc.deletedCount === 1) {
+					set.headers["Set-Cookie"] =
+						"session-id=; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
 
-						return;
-					}
-
-					set.status = "Bad Request";
-					return;
-				} catch (err) {
-					console.error(err);
-
-					set.status = "Internal Server Error";
 					return;
 				}
-			},
-			{
-				body: t.Object({
-					sessionId: t.String(),
-				}),
-			},
-		)
+
+				set.status = "Bad Request";
+				return;
+			} catch (err) {
+				console.error(err);
+
+				set.status = "Internal Server Error";
+				return;
+			}
+		})
 		// /userData
 		.get("/userData", async ({ set, mongo, cookie }) => {
 			const sessionId = cookie["session-id"];
@@ -548,7 +543,7 @@ async function main() {
 			try {
 				const db = mongo.db("setup3d");
 				const cookiesCol = db.collection<CookieDoc>("cookies");
-				const doc = await cookiesCol.findOne({ cookie: sessionId });
+				const doc = await cookiesCol.findOne({ cookie: sessionId.value });
 
 				if (doc) {
 					const userCol = db.collection<UserData>("authentication");
