@@ -538,43 +538,45 @@ async function main() {
 			},
 		)
 		// /userData
-		.post(
-			"/userData",
-			async ({ body, set, mongo }) => {
-				try {
-					const db = mongo.db("setup3d");
-					const cookiesCol = db.collection<CookieDoc>("cookies");
-					const doc = await cookiesCol.findOne({ cookie: body.sessionId });
+		.get("/userData", async ({ set, mongo, cookie }) => {
+			const sessionId = cookie["session-id"];
+			if (!sessionId.value) {
+				set.status = "Unauthorized";
+				return;
+			}
 
-					if (doc) {
-						const userCol = db.collection<UserData>("authentication");
-						const user = await userCol.findOne({ email: doc.email });
+			try {
+				const db = mongo.db("setup3d");
+				const cookiesCol = db.collection<CookieDoc>("cookies");
+				const doc = await cookiesCol.findOne({ cookie: sessionId });
 
-						if (user) {
-							return {
-								name: user.name,
-								email: user.email,
-								avatarLink: user.avatarLink,
-								uploadedModels: user.uploadedModels,
-							};
-						}
+				if (doc) {
+					const userCol = db.collection<UserData>("authentication");
+					const user = await userCol.findOne({ email: doc.email });
 
-						set.status = "Not Found";
+					if (user) {
+						return {
+							name: user.name,
+							email: user.email,
+							avatarLink: user.avatarLink,
+							uploadedModels: user.uploadedModels,
+							uploadedRigDataList: user.uploadedRigDataList,
+							cameras: user.cameras,
+						};
 					}
 
-					set.status = "Unauthorized";
-					return;
-				} catch (err) {
-					console.error(err);
-
-					set.status = "Internal Server Error";
-					return;
+					set.status = "Not Found";
 				}
-			},
-			{
-				body: t.Object({ sessionId: t.String() }),
-			},
-		)
+
+				set.status = "Unauthorized";
+				return;
+			} catch (err) {
+				console.error(err);
+
+				set.status = "Internal Server Error";
+				return;
+			}
+		})
 		// /modelData
 		.post(
 			"/modelData",
@@ -1250,7 +1252,28 @@ async function main() {
 					case ClientMessageType.PoseData: {
 						const data = message.data;
 
-						console.log("Received Pose data:", data);
+						console.log("Received Pose data");
+
+						const cameraUUID = ws.data.idToUUID.get(ws.id);
+						if (!cameraUUID) {
+							break;
+						}
+
+						const userId = await camUUIDtoUserId(cameraUUID, ws.data.mongo);
+						if (!userId) {
+							break;
+						}
+
+						const stream = ws.data.camStreams.get(userId);
+						if (!stream) {
+							break;
+						}
+
+						stream.send({
+							type: CameraStreamMessageType.ExternalPoseData,
+							uuid: cameraUUID,
+							data,
+						});
 
 						break;
 					}
@@ -1428,6 +1451,20 @@ async function loadConfig() {
 	}
 
 	return config;
+}
+
+async function camUUIDtoUserId(uuid: string, mongo: MongoClient) {
+	const db = mongo.db("setup3d");
+
+	const users = db.collection<UserData>("authentication");
+
+	const userDoc = await users.findOne({ cameras: uuid });
+
+	if (userDoc) {
+		return userDoc._id.toHexString();
+	}
+
+	return null;
 }
 
 const app = await main();
