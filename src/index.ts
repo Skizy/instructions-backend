@@ -1026,9 +1026,26 @@ async function main() {
 
 			camStreams.delete(doc._id.toHexString());
 		})
+		.get("/time-sync", () => {
+			const t1 = Date.now();
+
+			// Might do some stuff here in the future, idk
+
+			return { t1, t2: Date.now() };
+		})
+		.decorate("camRoundTrips", new Map<string, number>())
+		.post(
+			"/round-trip",
+			({ body, camRoundTrips }) => {
+				camRoundTrips.set(body.uuid, body.roundTrip);
+			},
+			{
+				body: t.Object({ uuid: t.String(), roundTrip: t.Number() }),
+			},
+		)
 		.post(
 			"/start-cameras",
-			async ({ set, cookie, mongo, body }) => {
+			async ({ set, cookie, mongo, body, camRoundTrips }) => {
 				const [doc, err] = await authenticate(cookie, mongo);
 
 				if (err) {
@@ -1055,10 +1072,27 @@ async function main() {
 					return;
 				}
 
+				let longestRT = 0;
+
+				for (const id of ids) {
+					const rt = camRoundTrips.get(id);
+
+					if (rt === undefined) {
+						set.status = "Internal Server Error";
+
+						return "Not all external cameras are synced";
+					}
+
+					if (rt > longestRT) {
+						longestRT = rt;
+					}
+				}
+
 				for (let i = 0; i < ids.length; i += 1) {
 					const result = sendToSocket(ids[i], {
 						type: ServerMessageType.Start,
 						fps: body.fps,
+						at: Date.now() + longestRT + 100,
 					});
 
 					if (!result) {
@@ -1242,6 +1276,9 @@ async function main() {
 					}
 					case ClientMessageType.ToggleResponse: {
 						console.log("Camera toggle recording succeded:", message.success);
+						if (!message.success) {
+							console.log(message.error);
+						}
 						break;
 					}
 					case ClientMessageType.Ping: {
