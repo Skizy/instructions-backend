@@ -947,6 +947,9 @@ async function main() {
 			}
 
 			const db = mongo.db("setup3d");
+
+			const userCol = db.collection<UserData>("authentication");
+
 			const col = db.collection<ExternalCamera>("cameras");
 			const result = col.find({
 				uuid: { $in: doc.cameras },
@@ -969,6 +972,11 @@ async function main() {
 					filtered.push(cam);
 				}
 			}
+
+			userCol.updateOne(
+				{ _id: doc._id },
+				{ $pull: { cameras: { $nin: filtered.map((cam) => cam.uuid) } } },
+			);
 
 			return filtered;
 		})
