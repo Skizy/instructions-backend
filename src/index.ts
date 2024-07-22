@@ -954,6 +954,8 @@ async function main() {
 			const now = Date.now();
 			for await (const cam of result) {
 				if (cam.expires < now) {
+					console.log("deleting cam with uuid", cam.uuid);
+
 					col.deleteOne({ _id: cam._id });
 
 					const stream = camStreams.get(doc._id.toHexString());
