@@ -1074,6 +1074,7 @@ async function main() {
 
 					if (rt === undefined) {
 						if (id === "main") continue;
+
 						set.status = "Internal Server Error";
 
 						return "Not all external cameras are synced";
