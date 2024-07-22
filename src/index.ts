@@ -377,9 +377,9 @@ async function main() {
 				return;
 			}
 		})
-		// /:asset
-		.get("/:asset", async ({ params: { asset }, set }) => {
-			const file = Bun.file(`./frontend/${asset}`);
+		// /assets/:asset
+		.get("/assets/:asset", async ({ params: { asset }, set }) => {
+			const file = Bun.file(`./public/${asset}`);
 			if (await file.exists()) {
 				return file;
 			}
