@@ -1069,10 +1069,11 @@ async function main() {
 
 				let longestRT = 0;
 
-				for (const id of ids) {
+				for (const id of ids.concat("main")) {
 					const rt = camRoundTrips.get(id);
 
 					if (rt === undefined) {
+						if (id === "main") continue;
 						set.status = "Internal Server Error";
 
 						return "Not all external cameras are synced";
@@ -1083,11 +1084,13 @@ async function main() {
 					}
 				}
 
+				const startAt = Date.now() + longestRT + 100;
+
 				for (let i = 0; i < ids.length; i += 1) {
 					const result = sendToSocket(ids[i], {
 						type: ServerMessageType.Start,
 						fps: body.fps,
-						at: Date.now() + longestRT + 100,
+						at: startAt,
 					});
 
 					if (!result) {
@@ -1105,6 +1108,8 @@ async function main() {
 				}
 
 				col.updateMany({ uuid: { $in: ids } }, { $set: { status: 2 } });
+
+				return { startAt };
 			},
 			{
 				body: t.Object({ ids: t.Array(t.String()), fps: t.Number() }),
