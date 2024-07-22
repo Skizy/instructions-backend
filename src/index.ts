@@ -1333,6 +1333,8 @@ async function main() {
 				const uuid = ws.data.idToUUID.get(ws.id);
 
 				if (uuid) {
+					ws.data.camRoundTrips.delete(uuid);
+
 					const db = ws.data.mongo.db("setup3d");
 					const col = db.collection<ExternalCamera>("cameras");
 					col.updateOne(
