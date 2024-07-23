@@ -59,6 +59,7 @@ type ExternalCamera = {
 	expires: number;
 	status: CameraState;
 	userAgent: string | null;
+	startedAt: number | null;
 };
 
 const ClientMessageCompiled = TypeCompiler.Compile(ClientMessage);
@@ -917,6 +918,7 @@ async function main() {
 				expires,
 				status: CameraState.Uninitialized,
 				userAgent: null,
+				startedAt: null,
 			});
 
 			if (!camResult.acknowledged) {
@@ -1298,6 +1300,24 @@ async function main() {
 						break;
 					}
 					case ClientMessageType.PoseData: {
+						const uuid = ws.data.idToUUID.get(ws.id);
+
+						if (uuid === undefined) {
+							console.error("idToUUID doesn't have", ws.id, "key");
+							return;
+						}
+
+						const db = ws.data.mongo.db("setup3d");
+						const col = db.collection<ExternalCamera>("cameras");
+
+						const startedAt =
+							(await col.findOne({ uuid: { $eq: uuid } }))?.startedAt ?? null;
+
+						if (startedAt === null) {
+							console.error("Didn't find the start time for this camera");
+							return;
+						}
+
 						const data = message.data;
 
 						console.log("Received Pose data");
@@ -1321,8 +1341,26 @@ async function main() {
 							type: CameraStreamMessageType.ExternalPoseData,
 							uuid: cameraUUID,
 							data,
+							startedAt,
 						});
 
+						break;
+					}
+					case ClientMessageType.StartedAt: {
+						const uuid = ws.data.idToUUID.get(ws.id);
+
+						if (uuid === undefined) {
+							console.error("idToUUID doesn't have", ws.id, "key");
+							return;
+						}
+
+						const db = ws.data.mongo.db("setup3d");
+						const col = db.collection<ExternalCamera>("cameras");
+
+						col.updateOne(
+							{ uuid: { $eq: uuid } },
+							{ $set: { startedAt: message.at } },
+						);
 						break;
 					}
 					default: {
@@ -1343,7 +1381,11 @@ async function main() {
 					col.updateOne(
 						{ uuid },
 						{
-							$set: { status: CameraState.Uninitialized, userAgent: undefined },
+							$set: {
+								status: CameraState.Uninitialized,
+								userAgent: null,
+								startedAt: null,
+							},
 						},
 					);
 
