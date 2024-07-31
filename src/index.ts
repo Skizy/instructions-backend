@@ -1254,7 +1254,7 @@ async function main() {
 								ws.close();
 								clearInterval(timeout.timer);
 							}
-						}, 5000);
+						}, 15000);
 						ws.data.timeouts.set(ws.id, {
 							reset: false,
 							timer,
