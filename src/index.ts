@@ -78,10 +78,26 @@ async function main() {
 
 	const config = await loadConfig();
 
+	const mongoClient = new MongoClient(config.mongourl);
+
+	// Reset camera state on server restart
+	const db = mongoClient.db("setup3d");
+	const cameraCol = db.collection<ExternalCamera>("cameras");
+	cameraCol.updateMany(
+		{},
+		{
+			$set: {
+				status: CameraState.Uninitialized,
+				userAgent: null,
+				startedAt: null,
+			},
+		},
+	);
+
 	const app = new Elysia()
 		// .use(cors())
 		.decorate("camStreams", new Map<string, CameraStream>())
-		.decorate("mongo", new MongoClient(config.mongourl))
+		.decorate("mongo", mongoClient)
 		.decorate("timeouts", new Map<string, { reset: boolean; timer: Timer }>())
 		// /ping
 		.get("/ping", () => "pong")
