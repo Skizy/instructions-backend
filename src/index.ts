@@ -1105,7 +1105,7 @@ async function main() {
 					}
 				}
 
-				const startAt = Date.now() + longestRT + 100;
+				const startAt = Date.now() + longestRT * 2 + 300;
 
 				for (let i = 0; i < ids.length; i += 1) {
 					const result = sendToSocket(ids[i], {
