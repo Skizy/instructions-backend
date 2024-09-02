@@ -1504,11 +1504,14 @@ function handleAuthError(
 
 			break;
 		}
-		// biome-ignore lint/suspicious/noFallthroughSwitchClause:
+		case 1: {
+			set.status = "Internal Server Error";
+
+			break;
+		}
 		case 2: {
 			console.error(err.message);
-		}
-		case 1: {
+
 			set.status = "Internal Server Error";
 
 			break;
