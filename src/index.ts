@@ -18,7 +18,7 @@ import {
 	ServerMessageType,
 } from "custom-types";
 
-type Model = {
+type Instruction = {
 	name: string;
 	manufacturer: string;
 	date: number | Long;
@@ -27,7 +27,7 @@ type Model = {
 	hidden?: boolean;
 };
 
-type RigData = {
+type RigTrack = {
 	name: string;
 	date: number | Long;
 	uploader: string;
@@ -38,8 +38,9 @@ type UserData = {
 	name: string;
 	avatarLink: string;
 	passwordHash: string;
+	uploadedInstructions: string[];
+	uploadedRigTracks: string[];
 	uploadedModels: string[];
-	uploadedRigDataList: string[];
 	selectedRigModel?: { id: string; name: string };
 	cameras?: string[];
 };
@@ -111,12 +112,24 @@ async function main() {
 
 			return room;
 		})
-		// /modelList
-		.get("/modelList", async ({ set, headers, mongo }) => {
+		.get("/instructionsList", async ({ set, headers, cookie, mongo }) => {
+			const [doc, err] = await authenticate(cookie, mongo);
+
+			if (err) {
+				handleAuthError(err, set);
+
+				return;
+			}
+
 			try {
 				const db = mongo.db("setup3d");
-				const col = db.collection<Model>("devcollection");
-				const cur = col.find({ hidden: { $not: { $eq: true } } });
+				const col = db.collection<Instruction>("devcollection");
+				const cur = col.find({
+					hidden: { $not: { $eq: true } },
+					_id: {
+						$in: doc.uploadedInstructions.map((x) => new ObjectId(x)),
+					},
+				});
 				const docs: {
 					id: string;
 					name: string;
@@ -127,7 +140,7 @@ async function main() {
 					const id = doc._id.toHexString();
 
 					try {
-						access(`${config.datapath}/models/${id}/${doc.fileName}`);
+						access(`${config.datapath}/instructions/${id}/${doc.fileName}`);
 					} catch (e) {
 						console.error(`${doc.name} at ${doc.fileName} is not accessible`);
 						continue;
@@ -141,7 +154,7 @@ async function main() {
 					});
 				}
 
-				console.debug("Returning modelList to request with headers:");
+				console.debug("Returning instruction list to request with headers:");
 				console.debug(headers);
 
 				return docs;
@@ -151,21 +164,20 @@ async function main() {
 				return;
 			}
 		})
-		// /models/:model
 		.get(
-			"/models/:model",
-			async ({ params: { model }, set, mongo }) => {
-				const id = new ObjectId(model);
+			"/instructions/:id",
+			async ({ params: { id }, set, mongo }) => {
+				const oid = new ObjectId(id);
 
 				try {
 					const db = mongo.db("setup3d");
-					const col = db.collection<Model>("devcollection");
+					const col = db.collection<Instruction>("devcollection");
 
-					const doc = await col.findOne({ _id: id });
+					const doc = await col.findOne({ _id: oid });
 					if (doc !== null) {
 						const fileName = doc.fileName;
 
-						const assetsPath = `${config.datapath}/models/${model}/deps`;
+						const assetsPath = `${config.datapath}/instructions/${id}/deps`;
 						let files: Dirent[];
 						try {
 							files = (
@@ -176,7 +188,7 @@ async function main() {
 							).filter((x) => !x.isDirectory());
 						} catch (e) {
 							console.log(
-								"Directory with assets for this model doesn't exist:",
+								"Directory with assets for this instruction doesn't exist:",
 								e,
 							);
 							files = [];
@@ -185,7 +197,7 @@ async function main() {
 						const fd = new FormData();
 						fd.append(
 							"file",
-							Bun.file(`${config.datapath}/models/${model}/${fileName}`),
+							Bun.file(`${config.datapath}/instructions/${id}/${fileName}`),
 						);
 						fd.append("fileName", fileName);
 
@@ -215,13 +227,11 @@ async function main() {
 				return;
 			},
 			{
-				params: t.Object({ model: t.String() }),
 				type: "multipart/form-data",
 			},
 		)
-		// /models
 		.post(
-			"/models",
+			"/instructions",
 			async ({ body, cookie, set, mongo }) => {
 				const sessionId = cookie["session-id"];
 				if (!sessionId.value) {
@@ -250,17 +260,16 @@ async function main() {
 						return;
 					}
 
-					const col = db.collection<Model>("devcollection");
+					const col = db.collection<Instruction>("devcollection");
 
 					const fileName = body.file.name;
 					const date = new Long(BigInt(Date.now()));
 
 					const result = await col.insertOne({
 						fileName,
-						name: body.modelName,
+						name: body.name,
 						manufacturer: body.manufacturer,
 						date,
-						// uploader: "",
 						uploader: userDoc._id.toHexString(),
 					});
 
@@ -271,11 +280,11 @@ async function main() {
 						const id = result.insertedId.toHexString();
 
 						console.log("creating a dir");
-						await $`mkdir -p ${config.datapath}/models/${id}/deps`;
+						await $`mkdir -p ${config.datapath}/instructions/${id}/deps`;
 						console.log("created a dir");
 
 						await Bun.write(
-							`${config.datapath}/models/${id}/${fileName}`,
+							`${config.datapath}/instructions/${id}/${fileName}`,
 							body.file,
 						);
 
@@ -283,20 +292,20 @@ async function main() {
 
 						if (body.assets !== undefined && body.assets.type.length > 0) {
 							const workingDirectory = await $`pwd`.text();
-							$.cwd(`${config.datapath}/models/${id}/deps`);
+							$.cwd(`${config.datapath}/instructions/${id}/deps`);
 							if (
 								body.assets.type === "application/gzip" ||
 								body.assets.type === "application/x-tar"
 							) {
 								const tmpFile = Bun.file(
-									`${config.datapath}/models/${id}/.tmp.tar.gz`,
+									`${config.datapath}/instructions/${id}/.tmp.tar.gz`,
 								);
 								await Bun.write(tmpFile, body.assets);
 								await $`tar -xf ../.tmp.tar.gz`;
 								await $`rm ../.tmp.tar.gz`;
 							} else if (body.assets.type === "application/zip") {
 								const tmpFile = Bun.file(
-									`${config.datapath}/models/${id}/.tmp.zip`,
+									`${config.datapath}/instructions/${id}/.tmp.zip`,
 								);
 								await Bun.write(tmpFile, body.assets);
 								await $`bsdtar -xf ../.tmp.zip`;
@@ -310,7 +319,7 @@ async function main() {
 
 						await userCol.updateOne(
 							{ _id: userDoc._id },
-							{ $addToSet: { uploadedModels: id } },
+							{ $addToSet: { uploadedInstructions: id } },
 						);
 					} else {
 						throw new Error("Didn't get the id of the inserted document");
@@ -329,69 +338,71 @@ async function main() {
 					file: t.File(),
 					assets: t.Optional(t.File()),
 					manufacturer: t.String(),
-					modelName: t.String(),
+					name: t.String(),
 				}),
 			},
 		)
-		// /models/:id
-		.delete("/models/:id", async ({ params: { id }, set, cookie, mongo }) => {
-			const sessionId = cookie["session-id"];
-			if (!sessionId.value) {
-				set.status = "Unauthorized";
-				return;
-			}
-
-			try {
-				const db = mongo.db("setup3d");
-				const cookiesCol = db.collection<CookieDoc>("cookies");
-				const doc = await cookiesCol.findOne({ cookie: sessionId.value });
-
-				if (!doc) {
+		.delete(
+			"/instructions/:id",
+			async ({ params: { id }, set, cookie, mongo }) => {
+				const sessionId = cookie["session-id"];
+				if (!sessionId.value) {
 					set.status = "Unauthorized";
 					return;
 				}
 
-				const userCol = db.collection<UserData>("authentication");
-				const user = await userCol.findOne({ email: doc.email });
+				try {
+					const db = mongo.db("setup3d");
+					const cookiesCol = db.collection<CookieDoc>("cookies");
+					const doc = await cookiesCol.findOne({ cookie: sessionId.value });
 
-				if (!user || !user.uploadedModels.includes(id)) {
-					set.status = "Unauthorized";
-					return;
-				}
+					if (!doc) {
+						set.status = "Unauthorized";
+						return;
+					}
 
-				const modelCol = db.collection<Model>("devcollection");
+					const userCol = db.collection<UserData>("authentication");
+					const user = await userCol.findOne({ email: doc.email });
 
-				const { exitCode, stderr } =
-					await $`mv ${config.datapath}/models/${id} ${config.datapath}/trash`.quiet();
-				if (exitCode !== 0) {
-					throw new Error(
-						`Process exited with code ${exitCode}. stderr: ${String.fromCharCode(
-							...stderr,
-						)}`,
+					if (!user || !user.uploadedInstructions.includes(id)) {
+						set.status = "Unauthorized";
+						return;
+					}
+
+					const instructionsCol = db.collection<Instruction>("devcollection");
+
+					const { exitCode, stderr } =
+						await $`mv ${config.datapath}/instructions/${id} ${config.datapath}/trash`.quiet();
+					if (exitCode !== 0) {
+						throw new Error(
+							`Process exited with code ${exitCode}. stderr: ${String.fromCharCode(
+								...stderr,
+							)}`,
+						);
+					}
+
+					const result = await instructionsCol.deleteOne({
+						_id: ObjectId.createFromHexString(id),
+					});
+					if (result.deletedCount !== 1) {
+						throw "Failed to delete the instruction document from the database";
+					}
+
+					const result2 = await userCol.updateOne(
+						{ _id: user._id },
+						{ $pull: { uploadedInstructions: id } },
 					);
-				}
+					if (result2.modifiedCount !== 1) {
+						throw "Failed to remove the instruction id from the user's document";
+					}
+				} catch (e) {
+					console.error(e);
+					set.status = "Internal Server Error";
 
-				const result = await modelCol.deleteOne({
-					_id: ObjectId.createFromHexString(id),
-				});
-				if (result.deletedCount !== 1) {
-					throw "Failed to delete the model document from the database";
+					return;
 				}
-
-				const result2 = await userCol.updateOne(
-					{ _id: user._id },
-					{ $pull: { uploadedModels: id } },
-				);
-				if (result2.modifiedCount !== 1) {
-					throw "Failed to remove the model id from the user's document";
-				}
-			} catch (e) {
-				console.error(e);
-				set.status = "Internal Server Error";
-
-				return;
-			}
-		})
+			},
+		)
 		// /assets/:asset
 		.get("/assets/:asset", async ({ params: { asset }, set }) => {
 			const file = Bun.file(`./public/${asset}`);
@@ -466,8 +477,9 @@ async function main() {
 						name: body.name,
 						avatarLink: "",
 						passwordHash: await Bun.password.hash(body.password),
+						uploadedInstructions: [],
+						uploadedRigTracks: [],
 						uploadedModels: [],
-						uploadedRigDataList: [],
 					});
 					const uuid = crypto.randomUUID();
 
@@ -569,8 +581,9 @@ async function main() {
 							name: user.name,
 							email: user.email,
 							avatarLink: user.avatarLink,
+							uploadedInstructions: user.uploadedInstructions,
+							uploadedRigTracks: user.uploadedRigTracks,
 							uploadedModels: user.uploadedModels,
-							uploadedRigDataList: user.uploadedRigDataList,
 							cameras: user.cameras,
 						};
 					}
@@ -587,37 +600,6 @@ async function main() {
 				return;
 			}
 		})
-		// /modelData
-		.post(
-			"/modelData",
-			async ({ set, body, mongo }) => {
-				try {
-					const db = mongo.db("setup3d");
-					const col = db.collection<Model>("devcollection");
-					const data = await col
-						.find({
-							_id: { $in: body.ids.map((x) => new ObjectId(x)) },
-						})
-						.map((doc) => ({
-							modelName: doc.name,
-							manufacturer: doc.manufacturer,
-							createdOn: doc.date,
-							id: doc._id.toHexString(),
-						}))
-						.toArray();
-
-					return data;
-				} catch (e) {
-					console.error(e);
-
-					set.status = "Internal Server Error";
-					return;
-				}
-			},
-			{
-				body: t.Object({ ids: t.Array(t.String()) }),
-			},
-		)
 		// /search
 		.post(
 			"/search",
@@ -626,7 +608,7 @@ async function main() {
 
 				try {
 					const db = mongo.db("setup3d");
-					const col = db.collection<Model>("devcollection");
+					const col = db.collection<Instruction>("devcollection");
 					const res = await col
 						.find({
 							$or: [
@@ -680,7 +662,7 @@ async function main() {
 						return;
 					}
 
-					const col = db.collection<RigData>("rigdata");
+					const col = db.collection<RigTrack>("rigdata");
 
 					const date = new Long(BigInt(Date.now()));
 
@@ -744,7 +726,7 @@ async function main() {
 					return;
 				}
 
-				const col = db.collection<RigData>("rigdata");
+				const col = db.collection<RigTrack>("rigdata");
 
 				const results = await col
 					.find({ uploader: userDoc._id.toHexString() })
@@ -766,7 +748,7 @@ async function main() {
 		.get("/rigData/:id", async ({ params: { id }, set, mongo }) => {
 			try {
 				const db = mongo.db("setup3d");
-				const col = db.collection<RigData>("rigdata");
+				const col = db.collection<RigTrack>("rigdata");
 
 				const result = await col.findOne({ _id: new ObjectId(id) });
 
