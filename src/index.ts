@@ -1,7 +1,6 @@
 import type { Dirent } from "node:fs";
 import { access, readdir } from "node:fs/promises";
 
-import { Stream } from "@elysiajs/stream";
 import { type Cookie, Elysia, type Static, t } from "elysia";
 import { TypeCompiler } from "elysia/type-system";
 
@@ -64,10 +63,9 @@ type ExternalCamera = {
 
 const ClientMessageCompiled = TypeCompiler.Compile(ClientMessage);
 
-type CameraStream = {
-	raw: Stream<string>;
+type CameraUpdate = {
 	send: (val: CameraStreamMessageT) => void;
-	intervalId: Timer;
+	close: () => void;
 };
 
 async function main() {
@@ -96,7 +94,7 @@ async function main() {
 
 	const app = new Elysia()
 		// .use(cors())
-		.decorate("camStreams", new Map<string, CameraStream>())
+		.decorate("camStreams", new Map<string, CameraUpdate>())
 		.decorate("mongo", mongoClient)
 		.decorate("timeouts", new Map<string, { reset: boolean; timer: Timer }>())
 		// /ping
@@ -995,51 +993,45 @@ async function main() {
 
 			return filtered;
 		})
-		.get("/cameras-stream", async ({ set, cookie, mongo, camStreams }) => {
-			const [doc, err] = await authenticate(cookie, mongo);
+		.ws("/cameras-update", {
+			async open(ws) {
+				const [doc, err] = await authenticate(ws.data.cookie, ws.data.mongo);
 
-			if (err) {
-				handleAuthError(err, set);
+				if (err) {
+					ws.close();
 
-				return;
-			}
+					return;
+				}
 
-			const stream = new Stream<string>();
-			stream.event = "message";
+				const send = (val: CameraStreamMessageT) =>
+					ws.send(JSON.stringify(val));
+				const close = () => ws.close();
 
-			const send = (val: CameraStreamMessageT) =>
-				stream.send(JSON.stringify(val));
-
-			send({ type: CameraStreamMessageType.Ping });
-
-			const timer = setInterval(() => {
 				send({ type: CameraStreamMessageType.Ping });
-			}, 2000);
 
-			const cameraStream: CameraStream = {
-				raw: stream,
-				send,
-				intervalId: timer,
-			};
+				setInterval(() => {
+					send({ type: CameraStreamMessageType.Ping });
+				}, 2000);
+				const cameraStream: CameraUpdate = {
+					send,
+					close,
+				};
 
-			camStreams.set(doc._id.toHexString(), cameraStream);
+				ws.data.camStreams.set(doc._id.toHexString(), cameraStream);
 
-			console.log(`Creating a stream of ${doc.email}`);
+				console.log(`Creating an update socket of ${doc.email}`);
+			},
+			async close(ws) {
+				const [doc, err] = await authenticate(ws.data.cookie, ws.data.mongo);
 
-			return stream;
-		})
-		.get("/close-stream", async ({ set, cookie, mongo, camStreams }) => {
-			const [doc, err] = await authenticate(cookie, mongo);
+				if (err) {
+					return;
+				}
 
-			if (err) {
-				handleAuthError(err, set);
+				ws.data.camStreams.delete(doc._id.toHexString());
 
-				return;
-			}
-
-			console.log(`Closing stream of ${doc.email}`);
-
-			camStreams.delete(doc._id.toHexString());
+				console.log(`Closed the update socket of ${doc.email}`);
+			},
 		})
 		.get("/time-sync", () => {
 			const t1 = Date.now();
