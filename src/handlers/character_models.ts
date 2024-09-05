@@ -99,7 +99,7 @@ export const characterModelHandlers = (config: AppConfig) =>
 				}
 
 				try {
-					access(
+					await access(
 						`${config.datapath}/rigModels/${userDoc.selectedRigModel.id}.glb`,
 					);
 				} catch (e) {

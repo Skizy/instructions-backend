@@ -49,7 +49,9 @@ export const instructionsHandlers = (config: AppConfig) =>
 					const id = doc._id.toHexString();
 
 					try {
-						access(`${config.datapath}/instructions/${id}/${doc.fileName}`);
+						await access(
+							`${config.datapath}/instructions/${id}/${doc.fileName}`,
+						);
 					} catch (e) {
 						console.error(`${doc.name} at ${doc.fileName} is not accessible`);
 						continue;
