@@ -1,14 +1,24 @@
+import { $ } from "bun";
+
+import { access } from "node:fs/promises";
+
 import { Elysia, t } from "elysia";
 import { Long, ObjectId } from "mongodb";
 
 import type { AppConfig } from "../config";
 import { setup } from "../setup";
-import type { CookieDoc, UserData } from "../utils";
+import {
+	type CookieDoc,
+	type UserData,
+	authenticate,
+	handleAuthError,
+} from "../utils";
 
 type RigTrack = {
 	name: string;
 	date: number | Long;
 	uploader: string;
+	deleted: boolean;
 };
 
 // type Model = {
@@ -60,6 +70,7 @@ export const modelsHandlers = (config: AppConfig) =>
 						name: body.name,
 						uploader: userDoc._id.toHexString(),
 						date,
+						deleted: false,
 					});
 
 					if (result.insertedId !== null) {
@@ -151,4 +162,148 @@ export const modelsHandlers = (config: AppConfig) =>
 				set.status = "Internal Server Error";
 				return;
 			}
-		});
+		})
+		.group("/rigTracks", (app) =>
+			app
+				.get("/", async ({ cookie, mongo, set }) => {
+					const [userDoc, err] = await authenticate(cookie, mongo);
+
+					if (err) {
+						handleAuthError(err, set);
+						return;
+					}
+
+					const db = mongo.db("setup3d");
+
+					const rigTracksCollection = db.collection<RigTrack>("rig_tracks");
+
+					const rigTracks = await rigTracksCollection
+						.find({ uploader: userDoc._id.toHexString(), deleted: false })
+						.toArray();
+
+					return rigTracks;
+				})
+				.get("/:id", async ({ cookie, mongo, params: { id }, set }) => {
+					const [userDoc, err] = await authenticate(cookie, mongo);
+
+					if (err) {
+						handleAuthError(err, set);
+						return;
+					}
+
+					if (!userDoc.uploadedRigTracks.includes(id)) {
+						set.status = "Unauthorized";
+
+						return;
+					}
+
+					const filePath = `${config.datapath}/rigTracks/${id}.json`;
+
+					try {
+						await access(filePath);
+					} catch (e) {
+						console.error(`${filePath} is not accessible`);
+
+						set.status = "Internal Server Error";
+
+						return;
+					}
+
+					return Bun.file(filePath);
+				})
+				.post(
+					"/",
+					async ({ body, cookie, mongo, set }) => {
+						const [userDoc, err] = await authenticate(cookie, mongo);
+
+						if (err) {
+							handleAuthError(err, set);
+							return;
+						}
+
+						const db = mongo.db("setup3d");
+						const userCollection = db.collection<UserData>("authentication");
+
+						const rigTracksCollection = db.collection<RigTrack>("rig_tracks");
+
+						const date = new Long(BigInt(Date.now()));
+
+						const result = await rigTracksCollection.insertOne({
+							name: body.name,
+							uploader: userDoc._id.toHexString(),
+							date,
+							deleted: false,
+						});
+
+						if (result.insertedId !== null) {
+							const id = result.insertedId.toHexString();
+
+							await Bun.write(
+								`${config.datapath}/rigTracks/${id}.json`,
+								body.rigTrack,
+							);
+
+							await userCollection.updateOne(
+								{ _id: userDoc._id },
+								{ $addToSet: { uploadedRigTracks: id } },
+							);
+						} else {
+							throw new Error("Didn't get the id of the inserted document");
+						}
+
+						set.status = "Created";
+					},
+					{
+						body: t.Object({
+							name: t.String(),
+							rigTrack: t.Union([t.File(), t.String()]),
+						}),
+					},
+				)
+				.delete("/:id", async ({ cookie, mongo, params: { id }, set }) => {
+					const [userDoc, err] = await authenticate(cookie, mongo);
+
+					if (err) {
+						handleAuthError(err, set);
+						return;
+					}
+
+					const db = mongo.db("setup3d");
+
+					const usersCollection = db.collection<UserData>("authentication");
+					const rigTracksCollection = db.collection<RigTrack>("rig_tracks");
+
+					await usersCollection.updateOne(
+						{ _id: userDoc._id },
+						{ $pull: { uploadedRigTracks: id } },
+					);
+
+					await rigTracksCollection.updateOne(
+						{ _id: ObjectId.createFromHexString(String(id)) },
+						{
+							$set: { deleted: true },
+						},
+					);
+
+					const filePath = `${config.datapath}/rigTracks/${id}.json`;
+
+					try {
+						await access(filePath);
+					} catch (e) {
+						console.error(`${filePath} is not accessible`);
+
+						set.status = "Internal Server Error";
+
+						return;
+					}
+
+					await $`mv ${filePath} ${config.datapath}/trash`;
+				}),
+		)
+		.group("/models", (app) =>
+			app
+				.get("/", () => {})
+				.get("/:id", ({ params: { id } }) => {})
+				.post("/", () => {})
+				.delete("/:id", ({ params: { id } }) => {}),
+		);
