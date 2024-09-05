@@ -16,6 +16,17 @@ async function main() {
 
 	const app = new Elysia()
 		.use(setup(config.mongourl))
+		.onError(({ code, error, set }) => {
+			console.error(error);
+
+			if (code === "VALIDATION") {
+				set.status = "Bad Request";
+
+				return error.toString();
+			}
+
+			return "";
+		})
 		.use(assetsHandlers(config))
 		.use(instructionsHandlers(config))
 		.use(authenticationHandlers(config))
@@ -23,12 +34,6 @@ async function main() {
 		.use(timesyncHandlers(config))
 		.use(cameraHandlers(config))
 		.use(characterModelHandlers(config))
-		.onError(({ code, error, set }) => {
-			if (code === "VALIDATION") {
-				set.status = "Bad Request";
-			}
-			console.error(error);
-		})
 		.listen(config.port);
 
 	console.log(
