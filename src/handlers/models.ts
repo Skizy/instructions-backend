@@ -2,8 +2,8 @@ import { $ } from "bun";
 
 import { access } from "node:fs/promises";
 
-import { Elysia, t } from "elysia";
-import { Long, ObjectId } from "mongodb";
+import { type Cookie, Elysia, t } from "elysia";
+import { Long, type MongoClient, ObjectId } from "mongodb";
 
 import type { AppConfig } from "../config";
 import { setup } from "../setup";
@@ -20,12 +20,6 @@ type RigTrack = {
 	uploader: string;
 	deleted: boolean;
 };
-
-// type Model = {
-// 	name: string;
-// 	date: number | Long;
-// 	uploader: string;
-// };
 
 export const modelsHandlers = (config: AppConfig) =>
 	new Elysia({
@@ -165,93 +159,37 @@ export const modelsHandlers = (config: AppConfig) =>
 		})
 		.group("/rigTracks", (app) =>
 			app
-				.get("/", async ({ cookie, mongo, set }) => {
-					const [userDoc, err] = await authenticate(cookie, mongo);
-
-					if (err) {
-						handleAuthError(err, set);
-						return;
-					}
-
-					const db = mongo.db("setup3d");
-
-					const rigTracksCollection = db.collection<RigTrack>("rig_tracks");
-
-					const rigTracks = await rigTracksCollection
-						.find({ uploader: userDoc._id.toHexString(), deleted: false })
-						.toArray();
-
-					return rigTracks;
+				.get("/", ({ cookie, mongo, set }) => {
+					return requestResourceList({
+						collection: "rig_tracks",
+						cookie,
+						mongo,
+						set,
+					});
 				})
-				.get("/:id", async ({ cookie, mongo, params: { id }, set }) => {
-					const [userDoc, err] = await authenticate(cookie, mongo);
-
-					if (err) {
-						handleAuthError(err, set);
-						return;
-					}
-
-					if (!userDoc.uploadedRigTracks.includes(id)) {
-						set.status = "Unauthorized";
-
-						return;
-					}
-
-					const filePath = `${config.datapath}/rigTracks/${id}.json`;
-
-					try {
-						await access(filePath);
-					} catch (e) {
-						console.error(`${filePath} is not accessible`);
-
-						set.status = "Internal Server Error";
-
-						return;
-					}
-
-					return Bun.file(filePath);
+				.get("/:id", ({ cookie, mongo, params: { id }, set }) => {
+					return requestResource({
+						cookie,
+						id,
+						mongo,
+						resourcePath: `${config.datapath}/rigTracks`,
+						set,
+						userProperty: "uploadedRigTracks",
+					});
 				})
 				.post(
 					"/",
-					async ({ body, cookie, mongo, set }) => {
-						const [userDoc, err] = await authenticate(cookie, mongo);
-
-						if (err) {
-							handleAuthError(err, set);
-							return;
-						}
-
-						const db = mongo.db("setup3d");
-						const userCollection = db.collection<UserData>("authentication");
-
-						const rigTracksCollection = db.collection<RigTrack>("rig_tracks");
-
-						const date = new Long(BigInt(Date.now()));
-
-						const result = await rigTracksCollection.insertOne({
-							name: body.name,
-							uploader: userDoc._id.toHexString(),
-							date,
-							deleted: false,
+					({ body, cookie, mongo, set }) => {
+						return createResource({
+							collection: "rig_tracks",
+							cookie,
+							mongo,
+							newResource: body.rigTrack,
+							newResourceName: body.name,
+							resourcePath: `${config.datapath}/rigTracks`,
+							set,
+							userProperty: "uploadedRigTracks",
 						});
-
-						if (result.insertedId !== null) {
-							const id = result.insertedId.toHexString();
-
-							await Bun.write(
-								`${config.datapath}/rigTracks/${id}.json`,
-								body.rigTrack,
-							);
-
-							await userCollection.updateOne(
-								{ _id: userDoc._id },
-								{ $addToSet: { uploadedRigTracks: id } },
-							);
-						} else {
-							throw new Error("Didn't get the id of the inserted document");
-						}
-
-						set.status = "Created";
 					},
 					{
 						body: t.Object({
@@ -260,50 +198,267 @@ export const modelsHandlers = (config: AppConfig) =>
 						}),
 					},
 				)
-				.delete("/:id", async ({ cookie, mongo, params: { id }, set }) => {
-					const [userDoc, err] = await authenticate(cookie, mongo);
-
-					if (err) {
-						handleAuthError(err, set);
-						return;
-					}
-
-					const db = mongo.db("setup3d");
-
-					const usersCollection = db.collection<UserData>("authentication");
-					const rigTracksCollection = db.collection<RigTrack>("rig_tracks");
-
-					await usersCollection.updateOne(
-						{ _id: userDoc._id },
-						{ $pull: { uploadedRigTracks: id } },
-					);
-
-					await rigTracksCollection.updateOne(
-						{ _id: ObjectId.createFromHexString(String(id)) },
-						{
-							$set: { deleted: true },
-						},
-					);
-
-					const filePath = `${config.datapath}/rigTracks/${id}.json`;
-
-					try {
-						await access(filePath);
-					} catch (e) {
-						console.error(`${filePath} is not accessible`);
-
-						set.status = "Internal Server Error";
-
-						return;
-					}
-
-					await $`mv ${filePath} ${config.datapath}/trash`;
+				.delete("/:id", ({ cookie, mongo, params: { id }, set }) => {
+					return deleteResource({
+						collection: "rig_tracks",
+						cookie,
+						id,
+						mongo,
+						resourcePath: `${config.datapath}/rigTracks`,
+						set,
+						trashPath: `${config.datapath}/trash`,
+						userProperty: "uploadedRigTracks",
+					});
 				}),
 		)
 		.group("/models", (app) =>
 			app
-				.get("/", () => {})
-				.get("/:id", ({ params: { id } }) => {})
-				.post("/", () => {})
-				.delete("/:id", ({ params: { id } }) => {}),
+				.get("/", ({ cookie, mongo, set }) => {
+					return requestResourceList({
+						collection: "models",
+						cookie,
+						mongo,
+						set,
+					});
+				})
+				.get("/:id", ({ cookie, mongo, params: { id }, set }) => {
+					return requestResource({
+						cookie,
+						id,
+						mongo,
+						resourcePath: `${config.datapath}/models`,
+						set,
+						userProperty: "uploadedModels",
+					});
+				})
+				.post(
+					"/",
+					({ body, cookie, mongo, set }) => {
+						return createResource({
+							collection: "models",
+							cookie,
+							mongo,
+							newResource: body.model,
+							newResourceName: body.name,
+							resourcePath: `${config.datapath}/models`,
+							set,
+							userProperty: "uploadedModels",
+						});
+					},
+					{
+						body: t.Object({
+							name: t.String(),
+							model: t.Union([t.File(), t.String()]),
+						}),
+					},
+				)
+				.delete("/:id", ({ cookie, mongo, params: { id }, set }) => {
+					return deleteResource({
+						collection: "models",
+						cookie,
+						id,
+						mongo,
+						resourcePath: `${config.datapath}/models`,
+						set,
+						trashPath: `${config.datapath}/trash`,
+						userProperty: "uploadedModels",
+					});
+				}),
 		);
+
+type Resource = {
+	name: string;
+	date: number | Long;
+	uploader: string;
+	deleted: boolean;
+};
+
+async function requestResourceList({
+	collection,
+	cookie,
+	mongo,
+	set,
+}: {
+	collection: string;
+	// biome-ignore lint/suspicious/noExplicitAny: <explanation>
+	cookie: Record<string, Cookie<any>>;
+	mongo: MongoClient;
+	set: { status?: undefined | number | string };
+}) {
+	const [userDoc, err] = await authenticate(cookie, mongo);
+
+	if (err) {
+		handleAuthError(err, set);
+		return;
+	}
+
+	const db = mongo.db("setup3d");
+
+	const resourceCollection = db.collection<Resource>(collection);
+
+	const resourceList = await resourceCollection
+		.find({ uploader: userDoc._id.toHexString(), deleted: false })
+		.toArray();
+
+	return resourceList;
+}
+
+async function requestResource({
+	cookie,
+	id,
+	mongo,
+	resourcePath,
+	set,
+	userProperty,
+}: {
+	// biome-ignore lint/suspicious/noExplicitAny: <explanation>
+	cookie: Record<string, Cookie<any>>;
+	id: string;
+	mongo: MongoClient;
+	resourcePath: string;
+	set: { status?: undefined | number | string };
+	userProperty: "uploadedRigTracks" | "uploadedModels";
+}) {
+	const [userDoc, err] = await authenticate(cookie, mongo);
+
+	if (err) {
+		handleAuthError(err, set);
+		return;
+	}
+
+	if (!userDoc[userProperty].includes(id)) {
+		set.status = "Unauthorized";
+
+		return;
+	}
+
+	const filePath = `${resourcePath}/${id}.json`;
+
+	try {
+		await access(filePath);
+	} catch (e) {
+		console.error(`${filePath} is not accessible`);
+
+		set.status = "Internal Server Error";
+
+		return;
+	}
+
+	return Bun.file(filePath);
+}
+
+async function createResource({
+	collection,
+	cookie,
+	mongo,
+	newResource,
+	newResourceName,
+	resourcePath,
+	set,
+	userProperty,
+}: {
+	collection: string;
+	// biome-ignore lint/suspicious/noExplicitAny: <explanation>
+	cookie: Record<string, Cookie<any>>;
+	mongo: MongoClient;
+	newResource: string | File;
+	newResourceName: string;
+	resourcePath: string;
+	set: { status?: undefined | number | string };
+	userProperty: "uploadedRigTracks" | "uploadedModels";
+}) {
+	const [userDoc, err] = await authenticate(cookie, mongo);
+
+	if (err) {
+		handleAuthError(err, set);
+		return;
+	}
+
+	const db = mongo.db("setup3d");
+	const userCollection = db.collection<UserData>("authentication");
+
+	const resourceCollection = db.collection<Resource>(collection);
+
+	const date = new Long(BigInt(Date.now()));
+
+	const result = await resourceCollection.insertOne({
+		name: newResourceName,
+		uploader: userDoc._id.toHexString(),
+		date,
+		deleted: false,
+	});
+
+	if (result.insertedId !== null) {
+		const id = result.insertedId.toHexString();
+
+		await Bun.write(`${resourcePath}/${id}.json`, newResource);
+
+		await userCollection.updateOne(
+			{ _id: userDoc._id },
+			{ $addToSet: { [userProperty]: id } },
+		);
+	} else {
+		throw new Error("Didn't get the id of the inserted document");
+	}
+
+	set.status = "Created";
+}
+
+async function deleteResource({
+	collection,
+	cookie,
+	id,
+	mongo,
+	resourcePath,
+	set,
+	trashPath,
+	userProperty,
+}: {
+	collection: string;
+	// biome-ignore lint/suspicious/noExplicitAny: <explanation>
+	cookie: Record<string, Cookie<any>>;
+	id: string;
+	mongo: MongoClient;
+	resourcePath: string;
+	set: { status?: undefined | number | string };
+	trashPath: string;
+	userProperty: "uploadedRigTracks" | "uploadedModels";
+}) {
+	const [userDoc, err] = await authenticate(cookie, mongo);
+
+	if (err) {
+		handleAuthError(err, set);
+		return;
+	}
+
+	const db = mongo.db("setup3d");
+
+	const usersCollection = db.collection<UserData>("authentication");
+	const resourceCollection = db.collection<Resource>(collection);
+
+	await usersCollection.updateOne(
+		{ _id: userDoc._id },
+		{ $pull: { [userProperty]: id } },
+	);
+
+	await resourceCollection.updateOne(
+		{ _id: ObjectId.createFromHexString(String(id)) },
+		{
+			$set: { deleted: true },
+		},
+	);
+
+	const filePath = `${resourcePath}/${id}.json`;
+
+	try {
+		await access(filePath);
+	} catch (e) {
+		console.error(`${filePath} is not accessible`);
+
+		set.status = "Internal Server Error";
+
+		return;
+	}
+
+	await $`mv ${filePath} ${trashPath}`;
+}
