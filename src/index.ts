@@ -16,6 +16,9 @@ async function main() {
 
 	const app = new Elysia()
 		.use(setup(config.mongourl))
+		.onBeforeHandle((context) => {
+			console.log(`Responding to ${context.path}`);
+		})
 		.onError(({ code, error, set }) => {
 			console.error(error);
 
