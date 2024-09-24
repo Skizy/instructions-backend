@@ -33,7 +33,7 @@ export const authenticationHandlers = (config: AppConfig) =>
 						date.setDate(date.getDate() + 3);
 
 						set.headers["Set-Cookie"] =
-							`session-id=${uuid}; Expires=${date.toUTCString()}`;
+							`session-id=${uuid}; Path=/; Expires=${date.toUTCString()}; SameSite=Strict`;
 
 						return;
 					}
@@ -80,7 +80,11 @@ export const authenticationHandlers = (config: AppConfig) =>
 					const col2 = db.collection("cookies");
 					await col2.insertOne({ email: body.email, cookie: uuid });
 
-					set.headers["Set-Cookie"] = `session-id=${uuid}`;
+					const date = new Date(Date.now());
+					date.setDate(date.getDate() + 3);
+
+					set.headers["Set-Cookie"] =
+						`session-id=${uuid}; Path=/; Expires=${date.toUTCString()}; SameSite=Strict`;
 
 					set.status = "Created";
 				} catch (err) {
@@ -137,7 +141,7 @@ export const authenticationHandlers = (config: AppConfig) =>
 
 				if (doc.deletedCount === 1) {
 					set.headers["Set-Cookie"] =
-						"session-id=; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+						"session-id=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
 
 					return;
 				}
