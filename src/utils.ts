@@ -1,5 +1,5 @@
-import type { Cookie } from "elysia";
-import type { Long, MongoClient } from "mongodb";
+import type { Cookie, Context } from "elysia";
+import type { Long, MongoClient, WithId } from "mongodb";
 
 type UserData = {
 	email: string;
@@ -25,6 +25,7 @@ type Instruction = {
 type CookieDoc = {
 	email: string;
 	cookie: string;
+	expires: number;
 };
 
 type AnyError = {
@@ -36,7 +37,7 @@ async function authenticate(
 	// biome-ignore lint/suspicious/noExplicitAny: the function signature of elysia handler
 	cookie: Record<string, Cookie<any>>,
 	mongo: MongoClient,
-) {
+): Promise<readonly [WithId<UserData>, null] | readonly [null, AnyError]> {
 	const sessionId = cookie["session-id"];
 	if (!sessionId.value) {
 		return [null, { code: 0, message: "Unauthorized" } as AnyError] as const;
@@ -51,6 +52,15 @@ async function authenticate(
 
 		if (!authDoc) {
 			return [null, { code: 0, message: "Unauthorized" } as AnyError] as const;
+		}
+
+		const now = Date.now();
+
+		if (authDoc.expires < now) {
+			return [
+				null,
+				{ code: 3, message: "Cookie expired" } as AnyError,
+			] as const;
 		}
 
 		const userCol = db.collection<UserData>("authentication");
@@ -75,10 +85,7 @@ async function authenticate(
 	}
 }
 
-function handleAuthError(
-	err: AnyError,
-	set: { status?: undefined | number | string },
-) {
+function handleAuthError(err: AnyError, set: Context["set"]) {
 	switch (err.code) {
 		case 0: {
 			set.status = "Unauthorized";
@@ -94,6 +101,15 @@ function handleAuthError(
 			console.error(err.message);
 
 			set.status = "Internal Server Error";
+
+			break;
+		}
+		case 3: {
+			console.warn("Used an expired cookie");
+
+			set.status = "Unauthorized";
+
+			set.headers["Set-Cookie"] = "session-id=; Path=/; Max-Age=0";
 
 			break;
 		}

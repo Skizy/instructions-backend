@@ -4,6 +4,8 @@ import type { AppConfig } from "../config";
 import { setup } from "../setup";
 import type { CookieDoc, UserData } from "../utils";
 
+const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 3;
+
 export const authenticationHandlers = (config: AppConfig) =>
 	new Elysia({
 		name: "authenticationHandlers",
@@ -26,14 +28,19 @@ export const authenticationHandlers = (config: AppConfig) =>
 					if (await Bun.password.verify(body.password, doc.passwordHash)) {
 						const uuid = crypto.randomUUID();
 
-						const col2 = db.collection<CookieDoc>("cookies");
-						await col2.insertOne({ email: body.email, cookie: uuid });
+						const expires = new Date(
+							Date.now() + COOKIE_MAX_AGE_SECONDS * 1000,
+						);
 
-						const date = new Date(Date.now());
-						date.setDate(date.getDate() + 3);
+						const col2 = db.collection<CookieDoc>("cookies");
+						await col2.insertOne({
+							email: body.email,
+							cookie: uuid,
+							expires: expires.getTime(),
+						});
 
 						set.headers["Set-Cookie"] =
-							`session-id=${uuid}; Path=/; Expires=${date.toUTCString()}; SameSite=Strict`;
+							`session-id=${uuid}; Path=/; Max-Age=${COOKIE_MAX_AGE_SECONDS}; SameSite=Strict`;
 
 						return;
 					}
@@ -77,14 +84,17 @@ export const authenticationHandlers = (config: AppConfig) =>
 					});
 					const uuid = crypto.randomUUID();
 
-					const col2 = db.collection("cookies");
-					await col2.insertOne({ email: body.email, cookie: uuid });
+					const expires = new Date(Date.now() + COOKIE_MAX_AGE_SECONDS * 1000);
 
-					const date = new Date(Date.now());
-					date.setDate(date.getDate() + 3);
+					const col2 = db.collection<CookieDoc>("cookies");
+					await col2.insertOne({
+						email: body.email,
+						cookie: uuid,
+						expires: expires.getTime(),
+					});
 
 					set.headers["Set-Cookie"] =
-						`session-id=${uuid}; Path=/; Expires=${date.toUTCString()}; SameSite=Strict`;
+						`session-id=${uuid}; Path=/; Max-Age=${COOKIE_MAX_AGE_SECONDS}; SameSite=Strict`;
 
 					set.status = "Created";
 				} catch (err) {
@@ -140,8 +150,7 @@ export const authenticationHandlers = (config: AppConfig) =>
 				const doc = await col.deleteOne({ cookie: sessionId.value });
 
 				if (doc.deletedCount === 1) {
-					set.headers["Set-Cookie"] =
-						"session-id=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+					set.headers["Set-Cookie"] = "session-id=; Path=/; Max-Age=0";
 
 					return;
 				}
