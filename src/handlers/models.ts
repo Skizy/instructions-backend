@@ -2,8 +2,8 @@ import { $ } from "bun";
 
 import { access } from "node:fs/promises";
 
-import { type Cookie, Elysia, t } from "elysia";
-import { Long, type MongoClient, ObjectId } from "mongodb";
+import { type Context, type Cookie, Elysia, t } from "elysia";
+import { Long, type MongoClient, ObjectId, type WithId } from "mongodb";
 
 import type { AppConfig } from "../config";
 import { setup } from "../setup";
@@ -273,7 +273,7 @@ type Resource = {
 	deleted: boolean;
 };
 
-async function requestResourceList({
+async function requestResourceList<T extends Resource>({
 	collection,
 	cookie,
 	mongo,
@@ -283,7 +283,7 @@ async function requestResourceList({
 	// biome-ignore lint/suspicious/noExplicitAny: <explanation>
 	cookie: Record<string, Cookie<any>>;
 	mongo: MongoClient;
-	set: { status?: undefined | number | string };
+	set: Context["set"];
 }) {
 	const [userDoc, err] = await authenticate(cookie, mongo);
 
@@ -297,10 +297,10 @@ async function requestResourceList({
 	const resourceCollection = db.collection<Resource>(collection);
 
 	const resourceList = await resourceCollection
-		.find({ uploader: userDoc._id.toHexString(), deleted: false })
+		.find({ uploader: userDoc._id.toHexString(), deleted: { $ne: true } })
 		.toArray();
 
-	return resourceList;
+	return resourceList as WithId<T>[];
 }
 
 async function requestResource({
@@ -316,7 +316,7 @@ async function requestResource({
 	id: string;
 	mongo: MongoClient;
 	resourcePath: string;
-	set: { status?: undefined | number | string };
+	set: Context["set"];
 	userProperty: "uploadedRigTracks" | "uploadedModels";
 }) {
 	const [userDoc, err] = await authenticate(cookie, mongo);
@@ -364,7 +364,7 @@ async function createResource({
 	newResource: string | File;
 	newResourceName: string;
 	resourcePath: string;
-	set: { status?: undefined | number | string };
+	set: Context["set"];
 	userProperty: "uploadedRigTracks" | "uploadedModels";
 }) {
 	const [userDoc, err] = await authenticate(cookie, mongo);
@@ -420,7 +420,7 @@ async function deleteResource({
 	id: string;
 	mongo: MongoClient;
 	resourcePath: string;
-	set: { status?: undefined | number | string };
+	set: Context["set"];
 	trashPath: string;
 	userProperty: "uploadedRigTracks" | "uploadedModels";
 }) {
@@ -442,7 +442,7 @@ async function deleteResource({
 	);
 
 	await resourceCollection.updateOne(
-		{ _id: ObjectId.createFromHexString(String(id)) },
+		{ _id: ObjectId.createFromHexString(id) },
 		{
 			$set: { deleted: true },
 		},
