@@ -9,7 +9,7 @@
 	},
 	"dependencies": {
 		"@elysiajs/stream": "^1.1.0",
-		"elysia": "^1.1.16",
+		"elysia": "^1.1.18",
 		"mongodb": "^6.9.0"
 	},
 	"devDependencies": {
