@@ -7,6 +7,7 @@ import { assetsHandlers } from "./handlers/assets";
 import { authenticationHandlers } from "./handlers/authentication";
 import { cameraHandlers } from "./handlers/cameras";
 import { characterModelHandlers } from "./handlers/character_models";
+import { draftHandlers } from "./handlers/drafts";
 import { instructionsHandlers } from "./handlers/instructions";
 import { modelsHandlers } from "./handlers/models";
 import { timesyncHandlers } from "./handlers/timesync";
@@ -37,6 +38,7 @@ async function main() {
 		.use(timesyncHandlers(config))
 		.use(cameraHandlers(config))
 		.use(characterModelHandlers(config))
+		.use(draftHandlers(config))
 		.listen(config.port);
 
 	console.log(
