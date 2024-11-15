@@ -1,17 +1,15 @@
-import { $ } from "bun";
-
-import { access } from "node:fs/promises";
-
-import { type Context, type Cookie, Elysia, t } from "elysia";
-import { Long, type MongoClient, ObjectId, type WithId } from "mongodb";
+import { Elysia, t } from "elysia";
+import { Long, ObjectId } from "mongodb";
 
 import type { AppConfig } from "../config";
 import { setup } from "../setup";
 import {
 	type CookieDoc,
 	type UserData,
-	authenticate,
-	handleAuthError,
+	createResource,
+	deleteResource,
+	requestResource,
+	requestResourceList,
 } from "../utils";
 
 type RigTrack = {
@@ -169,6 +167,7 @@ export const modelsHandlers = (config: AppConfig) =>
 				})
 				.get("/:id", ({ cookie, mongo, params: { id }, set }) => {
 					return requestResource({
+						collection: "rig_tracks",
 						cookie,
 						id,
 						mongo,
@@ -223,6 +222,7 @@ export const modelsHandlers = (config: AppConfig) =>
 				})
 				.get("/:id", ({ cookie, mongo, params: { id }, set }) => {
 					return requestResource({
+						collection: "models",
 						cookie,
 						id,
 						mongo,
@@ -265,200 +265,3 @@ export const modelsHandlers = (config: AppConfig) =>
 					});
 				}),
 		);
-
-type Resource = {
-	name: string;
-	date: number | Long;
-	uploader: string;
-	deleted: boolean;
-};
-
-async function requestResourceList<T extends Resource>({
-	collection,
-	cookie,
-	mongo,
-	set,
-}: {
-	collection: string;
-	// biome-ignore lint/suspicious/noExplicitAny: <explanation>
-	cookie: Record<string, Cookie<any>>;
-	mongo: MongoClient;
-	set: Context["set"];
-}) {
-	const [userDoc, err] = await authenticate(cookie, mongo);
-
-	if (err) {
-		handleAuthError(err, set);
-		return;
-	}
-
-	const db = mongo.db("setup3d");
-
-	const resourceCollection = db.collection<Resource>(collection);
-
-	const resourceList = await resourceCollection
-		.find({ uploader: userDoc._id.toHexString(), deleted: { $ne: true } })
-		.toArray();
-
-	return resourceList as WithId<T>[];
-}
-
-async function requestResource({
-	cookie,
-	id,
-	mongo,
-	resourcePath,
-	set,
-	userProperty,
-}: {
-	// biome-ignore lint/suspicious/noExplicitAny: <explanation>
-	cookie: Record<string, Cookie<any>>;
-	id: string;
-	mongo: MongoClient;
-	resourcePath: string;
-	set: Context["set"];
-	userProperty: "uploadedRigTracks" | "uploadedModels";
-}) {
-	const [userDoc, err] = await authenticate(cookie, mongo);
-
-	if (err) {
-		handleAuthError(err, set);
-		return;
-	}
-
-	if (!userDoc[userProperty].includes(id)) {
-		set.status = "Unauthorized";
-
-		return;
-	}
-
-	const filePath = `${resourcePath}/${id}.json`;
-
-	try {
-		await access(filePath);
-	} catch (e) {
-		console.error(`${filePath} is not accessible`);
-
-		set.status = "Internal Server Error";
-
-		return;
-	}
-
-	return Bun.file(filePath);
-}
-
-async function createResource({
-	collection,
-	cookie,
-	mongo,
-	newResource,
-	newResourceName,
-	resourcePath,
-	set,
-	userProperty,
-}: {
-	collection: string;
-	// biome-ignore lint/suspicious/noExplicitAny: <explanation>
-	cookie: Record<string, Cookie<any>>;
-	mongo: MongoClient;
-	newResource: string | File;
-	newResourceName: string;
-	resourcePath: string;
-	set: Context["set"];
-	userProperty: "uploadedRigTracks" | "uploadedModels";
-}) {
-	const [userDoc, err] = await authenticate(cookie, mongo);
-
-	if (err) {
-		handleAuthError(err, set);
-		return;
-	}
-
-	const db = mongo.db("setup3d");
-	const userCollection = db.collection<UserData>("authentication");
-
-	const resourceCollection = db.collection<Resource>(collection);
-
-	const date = new Long(BigInt(Date.now()));
-
-	const result = await resourceCollection.insertOne({
-		name: newResourceName,
-		uploader: userDoc._id.toHexString(),
-		date,
-		deleted: false,
-	});
-
-	if (result.insertedId !== null) {
-		const id = result.insertedId.toHexString();
-
-		await Bun.write(`${resourcePath}/${id}.json`, newResource);
-
-		await userCollection.updateOne(
-			{ _id: userDoc._id },
-			{ $addToSet: { [userProperty]: id } },
-		);
-	} else {
-		throw new Error("Didn't get the id of the inserted document");
-	}
-
-	set.status = "Created";
-}
-
-async function deleteResource({
-	collection,
-	cookie,
-	id,
-	mongo,
-	resourcePath,
-	set,
-	trashPath,
-	userProperty,
-}: {
-	collection: string;
-	// biome-ignore lint/suspicious/noExplicitAny: <explanation>
-	cookie: Record<string, Cookie<any>>;
-	id: string;
-	mongo: MongoClient;
-	resourcePath: string;
-	set: Context["set"];
-	trashPath: string;
-	userProperty: "uploadedRigTracks" | "uploadedModels";
-}) {
-	const [userDoc, err] = await authenticate(cookie, mongo);
-
-	if (err) {
-		handleAuthError(err, set);
-		return;
-	}
-
-	const db = mongo.db("setup3d");
-
-	const usersCollection = db.collection<UserData>("authentication");
-	const resourceCollection = db.collection<Resource>(collection);
-
-	await usersCollection.updateOne(
-		{ _id: userDoc._id },
-		{ $pull: { [userProperty]: id } },
-	);
-
-	await resourceCollection.updateOne(
-		{ _id: ObjectId.createFromHexString(id) },
-		{
-			$set: { deleted: true },
-		},
-	);
-
-	const filePath = `${resourcePath}/${id}.json`;
-
-	try {
-		await access(filePath);
-	} catch (e) {
-		console.error(`${filePath} is not accessible`);
-
-		set.status = "Internal Server Error";
-
-		return;
-	}
-
-	await $`mv ${filePath} ${trashPath}`;
-}

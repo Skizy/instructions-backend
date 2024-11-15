@@ -1,5 +1,10 @@
+import { $ } from "bun";
+
+import { access, constants as fsConstants } from "node:fs/promises";
+
 import type { Cookie, Context } from "elysia";
-import type { Long, MongoClient, WithId } from "mongodb";
+
+import { Long, ObjectId, type MongoClient, type WithId } from "mongodb";
 
 type UserData = {
 	email: string;
@@ -133,5 +138,274 @@ async function camUUIDtoUserId(uuid: string, mongo: MongoClient) {
 	return null;
 }
 
-export { authenticate, camUUIDtoUserId, handleAuthError };
+type Resource = {
+	name: string;
+	date: number | Long;
+	uploader: string;
+	deleted: boolean;
+};
+
+async function requestResourceList({
+	collection,
+	cookie,
+	mongo,
+	set,
+}: {
+	collection: string;
+	// biome-ignore lint/suspicious/noExplicitAny: <explanation>
+	cookie: Record<string, Cookie<any>>;
+	mongo: MongoClient;
+	set: Context["set"];
+}) {
+	const [userDoc, err] = await authenticate(cookie, mongo);
+
+	if (err) {
+		handleAuthError(err, set);
+		return;
+	}
+
+	const db = mongo.db("setup3d");
+
+	const resourceCollection = db.collection<Resource>(collection);
+
+	const resourceList = await resourceCollection
+		.find({ uploader: userDoc._id.toHexString(), deleted: { $ne: true } })
+		.map((doc) => ({ ...doc, _id: undefined, id: doc._id.toHexString() }))
+		.toArray();
+
+	return resourceList as Omit<(typeof resourceList)[number], "_id">[];
+}
+
+async function requestResourceAll({
+	collection,
+	cookie,
+	mongo,
+	resourcePath,
+	set,
+}: {
+	collection: string;
+	// biome-ignore lint/suspicious/noExplicitAny: <explanation>
+	cookie: Record<string, Cookie<any>>;
+	mongo: MongoClient;
+	resourcePath: string;
+	set: Context["set"];
+}) {
+	const [userDoc, err] = await authenticate(cookie, mongo);
+
+	if (err) {
+		handleAuthError(err, set);
+		return;
+	}
+
+	const db = mongo.db("setup3d");
+
+	const resourceCollection = db.collection<Resource>(collection);
+
+	const resourceList = await resourceCollection.find({
+		uploader: userDoc._id.toHexString(),
+		deleted: { $ne: true },
+	});
+}
+
+async function requestResource({
+	collection,
+	cookie,
+	id,
+	mongo,
+	resourcePath,
+	set,
+	userProperty,
+}: {
+	collection: string;
+	// biome-ignore lint/suspicious/noExplicitAny: <explanation>
+	cookie: Record<string, Cookie<any>>;
+	id: string;
+	mongo: MongoClient;
+	resourcePath: string;
+	set: Context["set"];
+	userProperty: "uploadedRigTracks" | "uploadedModels" | null;
+}) {
+	const [userDoc, err] = await authenticate(cookie, mongo);
+
+	if (err) {
+		handleAuthError(err, set);
+		return;
+	}
+
+	if (userProperty && !userDoc[userProperty].includes(id)) {
+		set.status = "Unauthorized";
+
+		return;
+	}
+
+	const db = mongo.db("setup3d");
+	const resourceCollection = db.collection<Resource>(collection);
+
+	const resource = await resourceCollection.findOne({ _id: new ObjectId(id) });
+	if (!resource) {
+		set.status = "Not Found";
+
+		return;
+	}
+	if (resource.uploader !== userDoc._id.toHexString()) {
+		set.status = "Unauthorized";
+
+		return;
+	}
+
+	const filePath = `${resourcePath}/${id}.json`;
+
+	try {
+		await access(filePath);
+	} catch (e) {
+		console.error(`${filePath} is not accessible`);
+
+		set.status = "Internal Server Error";
+
+		return;
+	}
+
+	return Bun.file(filePath);
+}
+
+async function createResource({
+	collection,
+	cookie,
+	mongo,
+	newResource,
+	newResourceName,
+	resourcePath,
+	set,
+	userProperty,
+}: {
+	collection: string;
+	// biome-ignore lint/suspicious/noExplicitAny: <explanation>
+	cookie: Record<string, Cookie<any>>;
+	mongo: MongoClient;
+	newResource: string | File;
+	newResourceName: string;
+	resourcePath: string;
+	set: Context["set"];
+	userProperty: "uploadedRigTracks" | "uploadedModels" | null;
+}) {
+	const [userDoc, err] = await authenticate(cookie, mongo);
+
+	if (err) {
+		handleAuthError(err, set);
+		return;
+	}
+
+	const db = mongo.db("setup3d");
+	const userCollection = db.collection<UserData>("authentication");
+
+	const resourceCollection = db.collection<Resource>(collection);
+
+	const date = new Long(BigInt(Date.now()));
+
+	const result = await resourceCollection.insertOne({
+		name: newResourceName,
+		uploader: userDoc._id.toHexString(),
+		date,
+		deleted: false,
+	});
+
+	if (result.insertedId !== null) {
+		const id = result.insertedId.toHexString();
+
+		await Bun.write(`${resourcePath}/${id}.json`, newResource);
+
+		if (userProperty) {
+			await userCollection.updateOne(
+				{ _id: userDoc._id },
+				{ $addToSet: { [userProperty]: id } },
+			);
+		}
+	} else {
+		throw new Error("Didn't get the id of the inserted document");
+	}
+
+	set.status = "Created";
+}
+
+async function deleteResource({
+	collection,
+	cookie,
+	id,
+	mongo,
+	resourcePath,
+	set,
+	trashPath,
+	userProperty,
+}: {
+	collection: string;
+	// biome-ignore lint/suspicious/noExplicitAny: <explanation>
+	cookie: Record<string, Cookie<any>>;
+	id: string;
+	mongo: MongoClient;
+	resourcePath: string;
+	set: Context["set"];
+	trashPath: string;
+	userProperty: "uploadedRigTracks" | "uploadedModels" | null;
+}) {
+	const [userDoc, err] = await authenticate(cookie, mongo);
+
+	if (err) {
+		handleAuthError(err, set);
+		return;
+	}
+
+	const filePath = `${resourcePath}/${id}.json`;
+
+	try {
+		await access(filePath, fsConstants.R_OK);
+	} catch (e) {
+		console.error(`${filePath} is not accessible`);
+
+		set.status = "Internal Server Error";
+
+		return;
+	}
+
+	try {
+		await access(trashPath, fsConstants.W_OK | fsConstants.X_OK);
+	} catch (e) {
+		console.error(`${trashPath} is not accessible`);
+
+		set.status = "Internal Server Error";
+
+		return;
+	}
+
+	const db = mongo.db("setup3d");
+
+	const usersCollection = db.collection<UserData>("authentication");
+	const resourceCollection = db.collection<Resource>(collection);
+
+	if (userProperty) {
+		await usersCollection.updateOne(
+			{ _id: userDoc._id },
+			{ $pull: { [userProperty]: id } },
+		);
+	}
+
+	await resourceCollection.updateOne(
+		{ _id: ObjectId.createFromHexString(id) },
+		{
+			$set: { deleted: true },
+		},
+	);
+
+	await $`mkdir -p ${trashPath}`;
+	await $`mv ${filePath} ${trashPath}`;
+}
+
+export {
+	authenticate,
+	camUUIDtoUserId,
+	handleAuthError,
+	requestResource,
+	requestResourceList,
+	createResource,
+	deleteResource,
+};
 export type { AnyError, CookieDoc, Instruction, UserData };
