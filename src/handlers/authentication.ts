@@ -5,6 +5,7 @@ import { setup } from "../setup";
 import type { CookieDoc, UserData } from "../utils";
 
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 3;
+const COOKIE_REMEMBER_SECONDS = 60 * 60 * 24 * 21;
 
 export const authenticationHandlers = (config: AppConfig) =>
 	new Elysia({
@@ -29,7 +30,11 @@ export const authenticationHandlers = (config: AppConfig) =>
 						const uuid = crypto.randomUUID();
 
 						const expires = new Date(
-							Date.now() + COOKIE_MAX_AGE_SECONDS * 1000,
+							Date.now() +
+								(body.rememberMe
+									? COOKIE_REMEMBER_SECONDS
+									: COOKIE_MAX_AGE_SECONDS) *
+									1000,
 						);
 
 						const col2 = db.collection<CookieDoc>("cookies");
@@ -40,7 +45,7 @@ export const authenticationHandlers = (config: AppConfig) =>
 						});
 
 						set.headers["Set-Cookie"] =
-							`session-id=${uuid}; Path=/; Max-Age=${COOKIE_MAX_AGE_SECONDS}; SameSite=Strict`;
+							`session-id=${uuid}; Path=/; Max-Age=${body.rememberMe ? COOKIE_REMEMBER_SECONDS : COOKIE_MAX_AGE_SECONDS}; SameSite=Strict`;
 
 						return;
 					}
