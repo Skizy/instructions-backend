@@ -6,8 +6,10 @@ import { setup } from "../setup";
 import {
 	type CookieDoc,
 	type UserData,
+	authenticate,
 	createResource,
 	deleteResource,
+	handleAuthError,
 	requestResource,
 	requestResourceList,
 } from "../utils";
@@ -164,6 +166,31 @@ export const modelsHandlers = (config: AppConfig) =>
 						mongo,
 						set,
 					});
+				})
+				.get("/desc/:id", async ({ cookie, mongo, set, params: { id } }) => {
+					const [userDoc, err] = await authenticate(cookie, mongo);
+
+					if (err) {
+						handleAuthError(err, set);
+						return;
+					}
+
+					const db = mongo.db("setup3d");
+
+					const rigTrackCollection = db.collection<{
+						name: string;
+						uploader: string;
+						date: number | Long;
+						deleted: boolean;
+					}>("rig_tracks");
+
+					const track = await rigTrackCollection.findOne({
+						uploader: userDoc._id.toHexString(),
+						_id: ObjectId.createFromHexString(id),
+						deleted: { $ne: false },
+					});
+
+					return track === null ? null : { name: track.name, date: track.date };
 				})
 				.get("/:id", ({ cookie, mongo, params: { id }, set }) => {
 					return requestResource({
