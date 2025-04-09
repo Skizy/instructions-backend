@@ -325,8 +325,116 @@ export const cameraHandlers = (config: AppConfig) => {
 					{ $set: { status: 1 } },
 				);
 			})
-			.decorate("idToUUID", new Map<string, string>())
-			.ws("/camera-socket", {
+			.ws("/camera-socket/:uuid", {
+				query: t.Object({
+					userAgent: t.String(),
+				}),
+				async open(ws) {
+					const uuid = ws.data.params.uuid;
+					const userAgent = ws.data.query.userAgent;
+
+					const db = ws.data.mongo.db("setup3d");
+					const col = db.collection<ExternalCamera>("cameras");
+					const doc = await col.findOne({ uuid });
+
+					if (doc === null || doc.status !== CameraState.Uninitialized) {
+						const error = doc === null ? "NotFound" : "InUse";
+
+						ws.close(4000, error);
+
+						return;
+					}
+
+					await col.updateOne(
+						{ _id: doc._id },
+						{
+							$set: {
+								status: CameraState.Waiting,
+								userAgent,
+							},
+						},
+					);
+
+					const authCol = db.collection<UserData>("authentication");
+					const result = await authCol.findOne({
+						cameras: doc.uuid,
+					});
+					if (result) {
+						const stream = ws.data.camStreams.get(result._id.toHexString());
+						if (stream) {
+							stream.send({
+								type: CameraStreamMessageType.StateUpdate,
+								uuid: doc.uuid,
+								state: CameraState.Waiting,
+								userAgent,
+							});
+						}
+					}
+
+					ws.subscribe(uuid);
+
+					const timeout = ws.data.timeouts.get(ws.id);
+					if (timeout) {
+						clearInterval(timeout.timer);
+					}
+
+					const timer = setInterval(async () => {
+						const timeout = ws.data.timeouts.get(ws.id);
+						if (!timeout) {
+							console.warn("Didn't find the interval in 'timeouts'");
+
+							ws.close();
+							clearInterval(timer);
+							return;
+						}
+
+						console.log("Interval for", uuid);
+
+						if (timeout.reset) {
+							timeout.reset = false;
+						} else {
+							console.log(`Lost connection to camera with id ${uuid}`);
+							ws.data.timeouts.delete(ws.id);
+
+							ws.data.camRoundTrips.delete(uuid);
+
+							const db = ws.data.mongo.db("setup3d");
+							const col = db.collection<ExternalCamera>("cameras");
+							col.updateOne(
+								{ uuid },
+								{
+									$set: {
+										status: CameraState.Uninitialized,
+										userAgent: null,
+										startedAt: null,
+									},
+								},
+							);
+
+							const authCol = db.collection<UserData>("authentication");
+							const result = await authCol.findOne({
+								cameras: uuid,
+							});
+							if (result) {
+								const stream = ws.data.camStreams.get(result._id.toHexString());
+								if (stream) {
+									stream.send({
+										type: CameraStreamMessageType.StateUpdate,
+										uuid,
+										state: CameraState.Uninitialized,
+									});
+								}
+							}
+
+							ws.close();
+							clearInterval(timeout.timer);
+						}
+					}, 10000);
+					ws.data.timeouts.set(ws.id, {
+						reset: false,
+						timer,
+					});
+				},
 				async message(ws, message) {
 					if (message instanceof Buffer) {
 						console.log("Received a Buffer in the websocket:", message);
@@ -338,159 +446,28 @@ export const cameraHandlers = (config: AppConfig) => {
 						return;
 					}
 
+					const uuid = ws.data.params.uuid;
+
 					switch (message.type) {
-						case ClientMessageType.UUID: {
-							console.log("Opening message of uuid", message.uuid);
-
-							const db = ws.data.mongo.db("setup3d");
-							const col = db.collection<ExternalCamera>("cameras");
-							const doc = await col.findOne({ uuid: message.uuid });
-
-							if (doc === null || doc.status !== CameraState.Uninitialized) {
-								const error = doc === null ? "NotFound" : "InUse";
-								ws.send(
-									JSON.stringify({
-										type: ServerMessageType.UUIDConfirmation,
-										success: false,
-										error,
-									} satisfies Static<typeof ServerMessage>),
-								);
-								ws.close();
-
-								break;
-							}
-
-							await col.updateOne(
-								{ _id: doc._id },
-								{
-									$set: {
-										status: CameraState.Waiting,
-										userAgent: message.userAgent,
-									},
-								},
-							);
-
-							const authCol = db.collection<UserData>("authentication");
-							const result = await authCol.findOne({
-								cameras: doc.uuid,
-							});
-							if (result) {
-								const stream = ws.data.camStreams.get(result._id.toHexString());
-								if (stream) {
-									stream.send({
-										type: CameraStreamMessageType.StateUpdate,
-										uuid: doc.uuid,
-										state: CameraState.Waiting,
-										userAgent: message.userAgent,
-									});
-								}
-							}
-
-							ws.send(
-								JSON.stringify({
-									type: ServerMessageType.UUIDConfirmation,
-									success: true,
-								} satisfies Static<typeof ServerMessage>),
-							);
-
-							ws.data.idToUUID.set(ws.id, message.uuid);
-
-							ws.subscribe(message.uuid);
-
-							const timeout = ws.data.timeouts.get(ws.id);
-							if (timeout) {
-								clearInterval(timeout.timer);
-							}
-
-							const timer = setInterval(async () => {
-								const timeout = ws.data.timeouts.get(ws.id);
-								if (!timeout) {
-									console.warn("Didn't find the interval in 'timeouts'");
-
-									ws.close();
-									clearInterval(timer);
-									return;
-								}
-
-								console.log("Interval for", ws.id);
-
-								if (timeout.reset) {
-									timeout.reset = false;
-								} else {
-									console.log(
-										`Lost connection to camera with id ${message.uuid}`,
-									);
-									ws.data.timeouts.delete(ws.id);
-
-									const uuid = ws.data.idToUUID.get(ws.id);
-									if (uuid) {
-										ws.data.idToUUID.delete(ws.id);
-										ws.data.camRoundTrips.delete(uuid);
-
-										const db = ws.data.mongo.db("setup3d");
-										const col = db.collection<ExternalCamera>("cameras");
-										col.updateOne(
-											{ uuid },
-											{
-												$set: {
-													status: CameraState.Uninitialized,
-													userAgent: null,
-													startedAt: null,
-												},
-											},
-										);
-
-										const authCol = db.collection<UserData>("authentication");
-										const result = await authCol.findOne({
-											cameras: uuid,
-										});
-										if (result) {
-											const stream = ws.data.camStreams.get(
-												result._id.toHexString(),
-											);
-											if (stream) {
-												stream.send({
-													type: CameraStreamMessageType.StateUpdate,
-													uuid,
-													state: CameraState.Uninitialized,
-												});
-											}
-										}
-									}
-
-									ws.close();
-									clearInterval(timeout.timer);
-								}
-							}, 10000);
-							ws.data.timeouts.set(ws.id, {
-								reset: false,
-								timer,
-							});
-
-							break;
-						}
 						case ClientMessageType.StateUpdate: {
 							const db = ws.data.mongo.db("setup3d");
 							const col = db.collection<ExternalCamera>("cameras");
 
-							col.updateOne(
-								{ uuid: { $eq: message.uuid } },
-								{ $set: { status: message.state } },
-							);
+							col.updateOne({ uuid }, { $set: { status: message.state } });
 
 							// Get the owner document id
 							const authCol = db.collection<UserData>("authentication");
 							const result = await authCol.findOne({
-								cameras: message.uuid,
+								cameras: uuid,
 							});
 							if (result) {
 								const stream = ws.data.camStreams.get(result._id.toHexString());
 								if (stream) {
-									console.log("Sending state update for uuid", message.uuid);
+									console.log("Sending state update for uuid", uuid);
 
 									stream.send({
 										type: CameraStreamMessageType.StateUpdate,
-										uuid: message.uuid,
+										uuid,
 										state: message.state,
 									});
 								}
@@ -510,8 +487,6 @@ export const cameraHandlers = (config: AppConfig) => {
 							break;
 						}
 						case ClientMessageType.Ping: {
-							console.log("Camera.Ping received");
-
 							const timeout = ws.data.timeouts.get(ws.id);
 							if (timeout) {
 								timeout.reset = true;
@@ -525,18 +500,11 @@ export const cameraHandlers = (config: AppConfig) => {
 							break;
 						}
 						case ClientMessageType.PoseData: {
-							const uuid = ws.data.idToUUID.get(ws.id);
-
-							if (uuid === undefined) {
-								console.error("idToUUID doesn't have", ws.id, "key");
-								return;
-							}
-
 							const db = ws.data.mongo.db("setup3d");
 							const col = db.collection<ExternalCamera>("cameras");
 
 							const startedAt =
-								(await col.findOne({ uuid: { $eq: uuid } }))?.startedAt ?? null;
+								(await col.findOne({ uuid }))?.startedAt ?? null;
 
 							if (startedAt === null) {
 								console.error("Didn't find the start time for this camera");
@@ -547,12 +515,7 @@ export const cameraHandlers = (config: AppConfig) => {
 
 							console.log("Received Pose data");
 
-							const cameraUUID = ws.data.idToUUID.get(ws.id);
-							if (!cameraUUID) {
-								break;
-							}
-
-							const userId = await camUUIDtoUserId(cameraUUID, ws.data.mongo);
+							const userId = await camUUIDtoUserId(uuid, ws.data.mongo);
 							if (!userId) {
 								break;
 							}
@@ -564,7 +527,7 @@ export const cameraHandlers = (config: AppConfig) => {
 
 							stream.send({
 								type: CameraStreamMessageType.ExternalPoseData,
-								uuid: cameraUUID,
+								uuid,
 								data,
 								startedAt,
 							});
@@ -572,20 +535,31 @@ export const cameraHandlers = (config: AppConfig) => {
 							break;
 						}
 						case ClientMessageType.StartedAt: {
-							const uuid = ws.data.idToUUID.get(ws.id);
-
-							if (uuid === undefined) {
-								console.error("idToUUID doesn't have", ws.id, "key");
-								return;
-							}
-
 							const db = ws.data.mongo.db("setup3d");
 							const col = db.collection<ExternalCamera>("cameras");
 
-							col.updateOne(
-								{ uuid: { $eq: uuid } },
-								{ $set: { startedAt: message.at } },
-							);
+							col.updateOne({ uuid }, { $set: { startedAt: message.at } });
+							break;
+						}
+						case ClientMessageType.EstimationData: {
+							console.log("Received Estimation data from camera", uuid);
+
+							const userId = await camUUIDtoUserId(uuid, ws.data.mongo);
+							if (!userId) {
+								break;
+							}
+
+							const stream = ws.data.camStreams.get(userId);
+							if (!stream) {
+								break;
+							}
+
+							stream.send({
+								type: CameraStreamMessageType.StreamedPoseData,
+								uuid,
+								data: message.data,
+							});
+
 							break;
 						}
 						default: {
@@ -596,43 +570,39 @@ export const cameraHandlers = (config: AppConfig) => {
 					}
 				},
 				async close(ws, _code, _message) {
-					const uuid = ws.data.idToUUID.get(ws.id);
+					const uuid = ws.data.params.uuid;
 
-					if (uuid) {
-						ws.data.camRoundTrips.delete(uuid);
+					ws.data.camRoundTrips.delete(uuid);
 
-						const db = ws.data.mongo.db("setup3d");
-						const col = db.collection<ExternalCamera>("cameras");
-						col.updateOne(
-							{ uuid },
-							{
-								$set: {
-									status: CameraState.Uninitialized,
-									userAgent: null,
-									startedAt: null,
-								},
+					const db = ws.data.mongo.db("setup3d");
+					const col = db.collection<ExternalCamera>("cameras");
+					col.updateOne(
+						{ uuid },
+						{
+							$set: {
+								status: CameraState.Uninitialized,
+								userAgent: null,
+								startedAt: null,
 							},
-						);
+						},
+					);
 
-						ws.data.idToUUID.delete(ws.id);
-
-						const authCol = db.collection<UserData>("authentication");
-						const result = await authCol.findOne({
-							cameras: uuid,
-						});
-						if (result) {
-							const stream = ws.data.camStreams.get(result._id.toHexString());
-							if (stream) {
-								stream.send({
-									type: CameraStreamMessageType.StateUpdate,
-									uuid,
-									state: CameraState.Uninitialized,
-								});
-							}
+					const authCol = db.collection<UserData>("authentication");
+					const result = await authCol.findOne({
+						cameras: uuid,
+					});
+					if (result) {
+						const stream = ws.data.camStreams.get(result._id.toHexString());
+						if (stream) {
+							stream.send({
+								type: CameraStreamMessageType.StateUpdate,
+								uuid,
+								state: CameraState.Uninitialized,
+							});
 						}
-
-						console.log("Closed socket of camera with uuid", uuid);
 					}
+
+					console.log("Closed socket of camera with uuid", uuid);
 
 					const timeout = ws.data.timeouts.get(ws.id);
 					if (timeout) {
