@@ -187,7 +187,7 @@ export const modelsHandlers = (config: AppConfig) =>
 					const track = await rigTrackCollection.findOne({
 						uploader: userDoc._id.toHexString(),
 						_id: ObjectId.createFromHexString(id),
-						deleted: { $ne: false },
+						deleted: { $ne: true },
 					});
 
 					return track === null ? null : { name: track.name, date: track.date };
