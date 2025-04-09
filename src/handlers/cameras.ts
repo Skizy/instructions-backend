@@ -219,6 +219,73 @@ export const cameraHandlers = (config: AppConfig) => {
 					console.log(`Closed the update socket of ${doc.email}`);
 				},
 			})
+			.get(
+				"/connect-camera",
+				async ({ set, cookie, mongo, query: { id } }) => {
+					const [doc, err] = await authenticate(cookie, mongo);
+
+					if (err) {
+						handleAuthError(err, set);
+
+						return;
+					}
+
+					if (!doc.cameras?.includes(id)) {
+						set.status = "Unauthorized";
+
+						return;
+					}
+
+					const db = mongo.db("setup3d");
+					const col = db.collection<ExternalCamera>("cameras");
+					const toEnable = await col.findOne({ uuid: id });
+
+					if (toEnable?.status !== CameraState.Ready) {
+						set.status = "Bad Request";
+
+						return;
+					}
+
+					sendToSocket(id, {
+						type: ServerMessageType.StartStreaming,
+					});
+				},
+				{ query: t.Object({ id: t.String() }) },
+			)
+			.get(
+				"/disconnect-camera",
+				async ({ set, cookie, mongo, query: { id } }) => {
+					const [doc, err] = await authenticate(cookie, mongo);
+
+					if (err) {
+						handleAuthError(err, set);
+
+						return;
+					}
+
+					if (!doc.cameras?.includes(id)) {
+						set.status = "Unauthorized";
+
+						return;
+					}
+
+					const db = mongo.db("setup3d");
+					const col = db.collection<ExternalCamera>("cameras");
+					const toStop = await col.findOne({ uuid: id });
+
+					if (toStop?.status !== CameraState.Analyzing) {
+						set.status = "Bad Request";
+
+						return;
+					}
+
+					sendToSocket(id, {
+						type: ServerMessageType.Stop,
+						sendVideo: false,
+					});
+				},
+				{ query: t.Object({ id: t.String() }) },
+			)
 			.post(
 				"/start-cameras",
 				async ({ set, cookie, mongo, body, camRoundTrips }) => {
