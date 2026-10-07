@@ -25,7 +25,6 @@ export const authenticationHandlers = (config: AppConfig) =>
 						return;
 					}
 
-					// Hash here
 					if (await Bun.password.verify(body.password, doc.passwordHash)) {
 						const uuid = crypto.randomUUID();
 
